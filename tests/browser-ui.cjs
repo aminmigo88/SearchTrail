@@ -7,7 +7,7 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
  const browser=await webkit.launch({headless:true});
  const context=await browser.newContext({viewport:{width:440,height:800},isMobile:true,hasTouch:true,deviceScaleFactor:2});
- const requests=[];let settings={paused:false,interceptGoogle:true,excludedHosts:[],placement:'bottom-right',clearance:16};
+ const requests=[];let settings={paused:false,interceptGoogle:true,excludedHosts:[],placement:'bottom-right',clearance:16,blockPopups:true,popupAllowedHosts:[]};
  const bookmarks=[];
  const items=[
   {id:'a',title:'A source on any website',url:'https://example.test/list',at:1,parentId:null},
@@ -17,25 +17,28 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
  ];
  await context.exposeBinding('sendMock',async(_,m)=>{
   requests.push(m);let data={};
-  if(m.type==='STATUS')data={source:items[1],sourceOpen:true,canReturn:true,currentId:'c',settings,host:'example.test',excluded:false};
+  if(m.type==='STATUS')data={source:items[1],sourceOpen:true,canReturn:true,currentId:'c',settings,host:'example.test',excluded:false,popupsAllowed:settings.popupAllowedHosts.includes('example.test')};
   if(m.type==='TREE')data={items,ancestors:items.slice(0,3),currentId:'c',total:4};
   if(m.type==='LIST'){const matches=items.filter(n=>!m.query||n.title.toLowerCase().includes(m.query.toLowerCase()));data={items:matches,total:4,matches:matches.length};}
-  if(m.type==='SETTINGS'){for(const k of ['placement','clearance','paused','interceptGoogle','menuHidden'])if(k in m)settings[k]=m[k];}
+  if(m.type==='SETTINGS'){for(const k of ['placement','clearance','paused','interceptGoogle','menuHidden','blockPopups'])if(k in m)settings[k]=m[k];}
+  if(m.type==='POPUP_ALLOW')settings.popupAllowedHosts=settings.popupAllowedHosts.includes('example.test')?[]:['example.test'];
   if(m.type==='BOOKMARKS')data={items:bookmarks};
   if(m.type==='BOOKMARK_SAVE'&&!bookmarks.length)bookmarks.push({...items[2],id:'bookmark'});
   if(m.type==='BOOKMARK_DELETE')bookmarks.length=0;
   if(m.type==='VISIT')data={recorded:true};
-  return {ok:true,data};
+  return {ok:true,data,settingsNow:JSON.parse(JSON.stringify(settings))};
  });
  await context.addInitScript(()=>{
   // Open shadow roots only inside this test, for inspection of production content/UI code.
   const attach=Element.prototype.attachShadow;Element.prototype.attachShadow=function(init){return attach.call(this,{...init,mode:'open'});};
   const listeners=[];
-  window.browser={extension:{inIncognitoContext:false},storage:{onChanged:{addListener:fn=>listeners.push(fn)}},runtime:{getManifest:()=>({version:"0.3.0"}),sendMessage:async m=>{const r=await window.sendMock(m);if(m.type==='SETTINGS')for(const fn of listeners)fn({settings:{}},'local');return r;}}};
+  window.browser={extension:{inIncognitoContext:false},
+   storage:{local:{get:async()=>({settings:(await window.sendMock({type:'READ_SETTINGS'})).settingsNow})},onChanged:{addListener:fn=>listeners.push(fn)}},
+   runtime:{onMessage:{addListener(){}},sendMessage:async m=>{const r=await window.sendMock(m);if(m.type==='SETTINGS'||m.type==='POPUP_ALLOW')for(const fn of listeners)fn({settings:{newValue:r.settingsNow}},'local');return r;}}};
  });
  const page=await context.newPage();
- await page.route('https://example.test/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><html dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Arabic page</title></head><body style="margin:20px;background:#fff"><h1>صفحة عربية للتجربة</h1><p>Test page for SearchTrail</p><a id="same" href="/next">Same tab link</a><br><a id="blank" target="_blank" href="https://other.test/page">New tab link</a><div style="height:1800px"></div></body></html>'}));
- async function inject(){for(const file of ['core.js','styles.js','ui.js','content.js'])await page.addScriptTag({path:path.join(__dirname,'../extension',file)});await page.locator('.launcher:not(.menu-launcher)').waitFor();}
+ await page.route('https://example.test/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><html dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Arabic page</title></head><body style="margin:20px;background:#fff"><h1>صفحة عربية للتجربة</h1><p>Test page for SearchTrail</p><a id="same" href="/next">Same tab link</a><br><a id="blank" target="_blank" href="https://other.test/page">New tab link</a><p><button id="adpop" onclick="window.__pop=window.open(\'https://ads.example/x\')">Ad pop-up</button> <button id="ownpop" onclick="window.__own=window.open(\'/own\')">Own window</button> <button id="progpop" onclick="var a=document.createElement(\'a\');a.href=\'https://ads.example/p\';a.target=\'_blank\';document.body.appendChild(a);a.click();">Script link</button></p><div style="height:1800px"></div></body></html>'}));
+ async function inject(){for(const file of ['core.js','guard.js','styles.js','ui.js','content.js'])await page.addScriptTag({path:path.join(__dirname,'../extension',file)});await page.locator('.launcher:not(.menu-launcher)').waitFor();}
  async function hold(){const b=await page.locator('.launcher:not(.menu-launcher)').boundingBox();await page.mouse.move(b.x+25,b.y+25);await page.mouse.down();await pause(600);await page.mouse.up();await page.locator('.panel').waitFor({state:'visible'});}
  async function eventually(fn){for(let i=0;i<40;i++){if(await fn())return;await pause(50);}throw Error('Condition not satisfied');}
  try {
@@ -89,6 +92,14 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   assert.ok(searchBox.x+searchBox.width<=dockBox.x,'Search box stays clear of the floating buttons');
   await page.screenshot({path:path.join(__dirname,'../dist/ui-history-bottom-search.png')});
   await page.getByRole('button',{name:'Settings',exact:true}).click();
+  // Pop-up settings: on by default, with an exception for this website, and an on/off switch.
+  assert.equal(await page.getByRole('checkbox',{name:'Block pop-ups'}).isChecked(),true,'Pop-up blocking is on by default');
+  await page.getByRole('button',{name:'Allow pop-ups on this site',exact:true}).click();
+  await eventually(()=>page.getByRole('button',{name:'Block pop-ups on this site',exact:true}).count().then(n=>n===1));
+  await page.getByRole('button',{name:'Block pop-ups on this site',exact:true}).click();
+  await page.getByRole('checkbox',{name:'Block pop-ups'}).uncheck();await eventually(()=>requests.some(m=>m.type==='SETTINGS'&&m.blockPopups===false));
+  await eventually(()=>page.getByRole('button',{name:'Allow pop-ups on this site',exact:true}).count().then(n=>n===0));
+  await page.getByRole('checkbox',{name:'Block pop-ups'}).check();await eventually(()=>requests.some(m=>m.type==='SETTINGS'&&m.blockPopups===true));
   await page.getByLabel('Button placement',{exact:true}).selectOption('bottom-left');
   await eventually(()=>page.locator('.launcher:not(.menu-launcher)').boundingBox().then(b=>b.x<20));
   await eventually(async()=>{const d=await page.locator('.dock').boundingBox(),n=await page.locator('.nav').boundingBox();return n.x>=d.x+d.width;});
@@ -120,11 +131,32 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   // A tap on the page outside the menu closes it.
   await page.mouse.click(10,10);await page.locator('.panel').waitFor({state:'hidden'});
   await page.setViewportSize({width:440,height:800});
+  // Pop-up blocker: script pop-ups, script-made link clicks and invisible cover links to other
+  // websites are stopped, with a short notice; the same website and links you tap still open.
+  const opened=[];context.on('page',p=>opened.push(p));
+  await context.route('https://ads.example/**',r=>r.fulfill({contentType:'text/html',body:'<title>Ad</title>Ad'}));
+  await context.route('https://example.test/own**',r=>r.fulfill({contentType:'text/html',body:'<title>Own</title>Own window'}));
+  await page.locator('#adpop').click();
+  assert.equal(await page.evaluate(()=>window.__pop),null,'window.open to another website returns nothing');
+  await eventually(()=>page.locator('.popup-note.show').count().then(n=>n===1));
+  const noteBox=await page.locator('.popup-note').boundingBox(),stackBox=await page.locator('.dock').boundingBox();
+  assert.ok(noteBox.y+noteBox.height<=stackBox.y,'Notice sits above the buttons');
+  await page.screenshot({path:path.join(__dirname,'../dist/ui-popup-blocked.png')});
+  await page.locator('#progpop').click();
+  await page.evaluate(()=>{const a=document.createElement('a');a.id='cover';a.target='_blank';a.href='https://ads.example/cover';a.style.cssText='position:fixed;inset:0;opacity:0;z-index:2147483646';document.body.append(a);});
+  const linkRequests=requests.filter(m=>m.type==='OPEN_LINK').length;
+  await page.mouse.click(200,300);await pause(300);
+  assert.equal(requests.filter(m=>m.type==='OPEN_LINK').length,linkRequests,'An invisible cover link does not open');
+  await page.evaluate(()=>document.getElementById('cover').remove());
+  assert.equal(opened.length,0,'No pop-up tab opened');
+  await page.locator('#ownpop').click();await eventually(()=>opened.length===1);
+  await opened[0].waitForURL(/example\.test\/own/);await opened[0].close();
+  await eventually(()=>page.locator('.popup-note.show').count().then(n=>n===0));
   const before=requests.length;await page.locator('#blank').click();await eventually(()=>requests.slice(before).some(m=>m.type==='OPEN_LINK'));
   assert.equal(page.url(),'https://example.test/details','Managed new-tab link must leave the source page intact');
   await page.locator('#same').click();await page.waitForURL('https://example.test/next');
   assert.ok(requests.some(m=>m.type==='LINK_INTENT'&&m.href==='https://example.test/next'),'Same-tab link should record intent');
-  console.log('WebKit checks passed: direct tap, stacked menu button, swipe to hide and restore, hold, one-handed bottom tabs and search, close by tapping outside, branching tree, RTL isolation, history filter, saved placement, viewport resizing, generic links. Extension APIs simulated.');
+  console.log('WebKit checks passed: direct tap, stacked menu button, swipe to hide and restore, hold, one-handed bottom tabs and search, close by tapping outside, pop-up blocking with notice and settings, branching tree, RTL isolation, history filter, saved placement, viewport resizing, generic links. Extension APIs simulated.');
  }catch(e){fs.mkdirSync(path.join(__dirname,'../dist'),{recursive:true});await page.screenshot({path:path.join(__dirname,'../dist/ui-failure.png')}).catch(()=>{});throw e;}
  finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

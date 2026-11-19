@@ -1,6 +1,14 @@
-# SearchTrail 0.3.2 — Safari browsing trails
+# SearchTrail 0.3.3 — Safari browsing trails
 
 Tap the floating arrow to return directly to the page that led here. Tap the separate ☰ button for a branching trail, saved history, bookmarks and settings. Holding the arrow is still an optional shortcut. Sources can be any permitted HTTP/HTTPS website.
+
+## New in 0.3.3
+
+- **Pop-up blocker:** stops websites from opening another website in a new tab when you tap (pop-under ads). It is on for all websites. Links you tap still open, including links to other websites such as downloads and documents, and a website may still open its own pages in a new tab.
+- How it works: script pop-ups (`window.open`), link clicks made by scripts, and invisible layers covering the page that open another website are stopped inside the page. If a pop-up tab still gets through, SearchTrail closes it at once, switches back to the tab you were on, and does not save its pages. A tab counts as a pop-up only when it opens right after a tap on the page, goes to another website, and is not the link you tapped; long-press "Open in New Tab" is left alone.
+- A small pop-up symbol with a red cross appears above the two buttons for a moment when something was blocked.
+- **Settings:** "Block pop-ups" switches the blocker on or off. "Allow pop-ups on this site" makes an exception for the current website (some sign-in windows open this way).
+- Limits: a website can still send the current tab itself to an ad page; the arrow brings you back. Safari must report which tab opened a new tab for the backup closing; otherwise the most recently tapped tab is used.
 
 ## New in 0.3.2
 
@@ -60,6 +68,7 @@ No certificate, provisioning profile or private key belongs in this repository. 
 - Open a new-tab link from a non-Google page and follow another link within the result. The immediate source should now be that result page; the original source should remain an ancestor in the tree.
 - Close a source tab, or navigate it to an unrelated page. Returning should load the saved source in the current result tab and leave the unrelated tab untouched.
 - Hold → Settings → Bottom left. Reload and visit another website: placement should remain. Check all corners, dragging, screen rotation and keyboard visibility.
+- On a site with pop-under ads, tap links: no ad tab should stay open, the red-cross symbol should flash above the buttons, and ad pages should not appear in History. Tap a download or document link to another website: it should open. Long-press a link → Open in New Tab: it should stay open. Turn Settings → Block pop-ups off and on, and try "Allow pop-ups on this site".
 - Verify private pages are absent; pause and exclude a site, then verify new pages there are not recorded. Test history search, deletion and JSON export.
 
 ## What is recorded

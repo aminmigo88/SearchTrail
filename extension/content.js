@@ -4,7 +4,7 @@
   globalThis.__searchTrailLoaded=true;
   const C=SearchTrailCore;
   const makeId=()=>Array.from(crypto.getRandomValues(new Uint32Array(4)),n=>n.toString(16)).join("-");
-  let host,shadow,button,menuButton,dock,scrim,panelRoot,ui,open=false,options,lastURL,navId,lastTitle,failed,pendingVisit,inFlight=false,retryAt=0,dragging=false,ready=false;
+  let host,shadow,button,menuButton,dock,note,scrim,panelRoot,ui,open=false,options,lastURL,navId,lastTitle,failed,pendingVisit,inFlight=false,retryAt=0,dragging=false,ready=false;
   const routes=[];
   async function call(message) {
     const response=await browser.runtime.sendMessage(message);
@@ -32,7 +32,7 @@
   function applyMenuState(){
     if(!menuButton)return;const hidden=menuHidden(),state=hidden+"|"+open+"|"+edgeRight();
     if(state===menuState)return;menuState=state;
-    menuButton.classList.toggle("tucked",hidden);menuButton.classList.toggle("edge-left",!edgeRight());
+    menuButton.classList.toggle("tucked",hidden);menuButton.classList.toggle("edge-left",!edgeRight());dock.classList.toggle("menu-hidden",hidden);
     menuButton.textContent=open?"×":"☰";
     menuButton.setAttribute("aria-label",hidden?"Show the SearchTrail menu button":open?"Close SearchTrail menu":"Open SearchTrail menu");
     menuButton.title=hidden?"Drag out or tap to show the menu button":open?"Close menu":"Open menu · swipe to the side to hide";
@@ -42,6 +42,25 @@
     applyMenuState();position();
     call({type:"SETTINGS",menuHidden:value}).catch(reportError);
   }
+  // Pop-up blocker (guard.js and background.js do the blocking). Here: invisible layers that
+  // cover the page and open another website wherever you tap, and the short notice.
+  const popupBlocking=()=>options?.settings?.blockPopups!==false&&!C.excluded(location.href,options?.settings?.popupAllowedHosts||[]);
+  function coversPage(a) {
+    const r=a.getBoundingClientRect(),w=innerWidth,h=innerHeight;
+    const area=Math.max(0,Math.min(r.right,w)-Math.max(r.left,0))*Math.max(0,Math.min(r.bottom,h)-Math.max(r.top,0));
+    if(area>=.85*w*h)return true;
+    for(let n=a,i=0;n instanceof Element&&i<4;n=n.parentElement,i++){const cs=getComputedStyle(n);if(Number(cs.opacity)<.05||cs.visibility==="hidden")return true;}
+    return false;
+  }
+  const POPUP_ICON='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" stroke="#1a6dff" stroke-width="1.8"/><path d="M3 8.5h18" stroke="#1a6dff" stroke-width="1.8"/><path d="M9.5 11.5l5 5M14.5 11.5l-5 5" stroke="#e5484d" stroke-width="2.4"/></svg>';
+  let noteTimer;
+  function showPopupNote() {
+    mount();if(!note)return;
+    note.classList.remove("show");void note.offsetWidth;note.classList.add("show");
+    clearTimeout(noteTimer);noteTimer=setTimeout(()=>note.classList.remove("show"),1600);
+  }
+  document.addEventListener("searchtrail:blocked",showPopupNote);
+  browser.runtime.onMessage?.addListener(message=>{if(message?.type==="POPUP_BLOCKED")showPopupNote();});
   function reportError(e) {failed=e.message;if(button){button.classList.add("bad");button.title=failed;}ui?.error(failed);}
   function viewport() {const v=window.visualViewport;return {x:v?.offsetLeft||0,y:v?.offsetTop||0,width:v?.width||innerWidth,height:v?.height||innerHeight};}
   function position() {
@@ -50,7 +69,7 @@
     const left=placement.endsWith("left"),top=placement.startsWith("top");
     const y=v.y+(top?clearance:Math.max(8,v.height-STACK_H-clearance)),x=v.x+(left?EDGE_GAP:Math.max(8,v.width-STACK_W-EDGE_GAP));
     host.style.setProperty("left",x+"px","important");host.style.setProperty("top",y+"px","important");
-    applyMenuState();
+    dock.classList.toggle("at-top",top);applyMenuState();
     const panelWidth=Math.min(400,v.width-16),panelHeight=Math.min(560,Math.max(180,v.height*.68),v.height-16);
     const panelY=top?v.y+8:v.y+v.height-panelHeight-8;
     panelRoot.style.cssText=`position:fixed;z-index:1;left:${v.x+(left?8:v.width-panelWidth-8)}px;top:${panelY}px;--sheet-width:${panelWidth}px;--sheet-height:${panelHeight}px;--sheet-origin:${top?"top":"bottom"} center;direction:ltr;`;
@@ -71,7 +90,7 @@
   }
   function mount() {
     if(host?.isConnected)return;
-    host=document.createElement("div");host.setAttribute("dir","ltr");
+    host=document.createElement("div");host.setAttribute("dir","ltr");host.setAttribute("data-searchtrail","");
     host.style.cssText="all:initial!important;position:fixed!important;z-index:2147483647!important;display:block!important;direction:ltr!important;";
     shadow=host.attachShadow({mode:"closed"});const style=document.createElement("style");style.textContent=SearchTrailCSS;shadow.append(style);
     scrim=document.createElement("div");scrim.className="scrim";scrim.hidden=true;scrim.onclick=()=>toggle(false);
@@ -81,7 +100,8 @@
     dock=document.createElement("div");dock.className="dock";
     menuButton=document.createElement("button");menuButton.className="launcher menu-launcher";menuButton.textContent="☰";menuButton.title="Open SearchTrail menu";
     menuButton.setAttribute("aria-label","Open SearchTrail menu");menuButton.setAttribute("aria-expanded","false");
-    dock.append(menuButton,button);shadow.append(dock);applyMenuState();
+    note=document.createElement("div");note.className="popup-note";note.setAttribute("role","status");note.setAttribute("aria-label","Pop-up blocked");note.innerHTML=POPUP_ICON;
+    dock.append(menuButton,button,note);shadow.append(dock);applyMenuState();
     let mstart=null,mswipe=false,msuppress=0;
     const towardEdge=dx=>edgeRight()?dx:-dx;
     menuButton.onpointerdown=e=>{
@@ -168,11 +188,16 @@
     catch(e){if(e.message.includes("Private Browsing")){host?.remove();return;}reportError(e);mount();}
   }
   document.addEventListener("click",e=>{
-    if(!e.isTrusted || e.defaultPrevented || e.button!==0 || e.shiftKey || e.altKey || options?.settings.paused || options?.excluded)return;
+    if(!e.isTrusted || e.defaultPrevented || e.button!==0 || e.shiftKey || e.altKey)return;
     const a=e.composedPath().find(n=>n instanceof HTMLAnchorElement);
     if(!a || a.hasAttribute("download") || a.getAttribute("role")==="button")return;
     const href=C.webURL(a.href);if(!href)return;
     const target=(a.target||document.querySelector("base[target]")?.target||"").toLowerCase();
+    // A layer covering the page that opens another website in a new tab is a pop-up, not a link.
+    if(target&&!["_self","_parent","_top"].includes(target)&&popupBlocking()&&!C.sameSite(href,location.href)&&coversPage(a)){
+      e.preventDefault();e.stopImmediatePropagation();showPopupNote();return;
+    }
+    if(options?.settings.paused || options?.excluded)return;
     const google=options?.settings.interceptGoogle && C.resultURL(href,location.href);
     // Normal same-tab links keep their website behavior. Observe the edge only.
     if(!google && target!=="_blank"){

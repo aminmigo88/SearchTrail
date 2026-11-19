@@ -49,11 +49,26 @@
   function samePage(a, b) {
     const key=pageKey(a);return !!key && key===pageKey(b);
   }
+  // Website identity for pop-up blocking: the registrable part of the host name, so
+  // "www.example.com" and "files.example.com" are one website. Country endings such as
+  // "co.uk" or "com.eg" keep one more label.
+  const SECOND_LEVEL=new Set(["co","com","net","org","gov","edu","ac","or","ne","go","gob","mil","nic"]);
+  function siteOf(value) {
+    const url=webURL(value);if(!url)return null;
+    const host=new URL(url).hostname.toLowerCase().replace(/\.$/,"");
+    if(/^[\d.]+$/.test(host)||host.includes(":"))return host;
+    const parts=host.split(".");if(parts.length<=2)return host;
+    const tld=parts[parts.length-1],sld=parts[parts.length-2];
+    return parts.slice(tld.length===2&&SECOND_LEVEL.has(sld)?-3:-2).join(".");
+  }
+  function sameSite(a, b) {
+    const site=siteOf(a);return !!site && site===siteOf(b);
+  }
   function sameSearch(source, currentURL, rootState) {
     return !!source && searchKey(source.url) === searchKey(currentURL) &&
       source.token === rootState?.rootToken;
   }
-  const api = {webURL, searchKey, resultURL, excluded, sameSearch, pageKey, samePage};
+  const api = {webURL, searchKey, resultURL, excluded, sameSearch, pageKey, samePage, siteOf, sameSite};
   root.SearchTrailCore = api;
   if (typeof module !== "undefined") module.exports = api;
 })(globalThis);

@@ -4,7 +4,7 @@ const fs=require('node:fs'),vm=require('node:vm');
 const {webcrypto}=require('node:crypto');
 function event(){const f=[];return {addListener:fn=>f.push(fn),emit:(...a)=>f.map(fn=>fn(...a)),listeners:f};}
 function harness(sharedLocal){
-  const local=sharedLocal||{},session={},tabMap=new Map();let nextTab=10;
+  const local=sharedLocal||{},session={},tabMap=new Map(),sent=[];let nextTab=10;
   const createEvent=event(),removeEvent=event(),onMessage=event(),startup=event();
   const changes=event();
   const area=(obj,name)=>({
@@ -15,14 +15,18 @@ function harness(sharedLocal){
   const B={storage:{local:area(local,'local'),session:area(session,'session'),onChanged:changes},extension:{inIncognitoContext:false},runtime:{onMessage,onStartup:startup},tabs:{onCreated:createEvent,onRemoved:removeEvent,
     async get(n){if(!tabMap.has(n))throw Error('Tab closed');return {...tabMap.get(n)};},
     async create(options){const t={id:nextTab++,incognito:false,...options};tabMap.set(t.id,t);createEvent.emit(t);return t;},
-    async update(n,options){if(!tabMap.has(n))throw Error('Tab closed');Object.assign(tabMap.get(n),options);return tabMap.get(n);}
+    async update(n,options){if(!tabMap.has(n))throw Error('Tab closed');Object.assign(tabMap.get(n),options);return tabMap.get(n);},
+    async remove(n){tabMap.delete(n);removeEvent.emit(n);},
+    async sendMessage(n,message,options){sent.push({tabId:n,message,options});}
   }};
   const ctx=vm.createContext({browser:B,URL,URLSearchParams,crypto:webcrypto,console,setTimeout});
   for(const file of ['core.js','background.js'])vm.runInContext(fs.readFileSync(require.resolve('../extension/'+file),'utf8'),ctx);
   function add(id,url,extra={}){const t={id,url,title:url,incognito:false,...extra};tabMap.set(id,t);return t;}
   async function send(id,type,data={}){return onMessage.listeners[0]({type,...data},{tab:{...tabMap.get(id)},frameId:0,url:tabMap.get(id)?.url});}
   async function visit(id,navigationId=webcrypto.randomUUID(),extra={}){return send(id,'VISIT',{url:tabMap.get(id).url,title:tabMap.get(id).title,navigationId,...extra});}
-  return {add,send,visit,tabMap,local,session,B};
+  // A tab opened by the page itself (window.open or a link), not by SearchTrail.
+  function popup(id,url,openerTabId){const t={id,url,title:url,incognito:false,openerTabId};tabMap.set(id,t);createEvent.emit(t);return t;}
+  return {add,send,visit,popup,tabMap,local,session,sent,B};
 }
 test('two concurrent Google searches keep their own destinations',async()=>{
   const h=harness();h.add(1,'https://www.google.com/search?q=air');h.add(2,'https://www.google.com/search?q=printer');
@@ -398,4 +402,67 @@ test('copies of the same search saved by older versions are merged in the trail 
   assert.equal(Array.from(t.items).find(n=>n.id==='r2').parentId,'g1');
   assert.equal((await h.send(1,'STATUS')).data.source,null);
   assert.equal((await h.send(1,'RETURN')).data.none,true);
+});
+const settle=()=>new Promise(r=>setTimeout(r,10));
+test('a pop-up tab to another website right after a tap is closed and its pages are not saved',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
+  await h.send(1,'TAP',{href:'https://akwam.ss/series'});
+  h.popup(50,'about:blank',1);
+  const r=await h.visit(50,'ad');h.tabMap.has(50)&&(h.tabMap.get(50).url='https://s.viieuvkf.com/h/845');
+  const r2=h.tabMap.has(50)?await h.visit(50,'ad2'):r;await settle();
+  assert.equal(h.tabMap.has(50),false,'pop-up tab closed');assert.equal(h.tabMap.get(1).active,true,'back to the page');
+  assert.ok(h.sent.some(x=>x.tabId===1&&x.message.type==='POPUP_BLOCKED'),'page told to show the note');
+  assert.equal((await h.send(1,'LIST')).data.total,1,'only the real page is saved');
+  assert.equal(r2.data?.recorded??false,false);
+});
+test('a pop-up is closed as soon as Safari reports its address',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
+  await h.send(1,'TAP',{href:'https://akwam.ss/series'});
+  h.popup(51,'https://www.trip.com/',1);await settle();
+  assert.equal(h.tabMap.has(51),false);assert.equal(h.tabMap.get(1).active,true);
+});
+test('tabs you open yourself are never closed',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
+  // No tap just before: for example long-press "Open in New Tab".
+  h.popup(52,'https://other.example/',1);await settle();assert.equal(h.tabMap.has(52),true);
+  // The link you tapped, to another website (a download or a document).
+  await h.send(1,'TAP',{href:'https://files.example/doc.pdf'});h.popup(53,'https://files.example/doc.pdf',1);await settle();assert.equal(h.tabMap.has(53),true);
+  // Links SearchTrail opens for you.
+  await h.send(1,'TAP',{href:'https://other.example/a'});await h.send(1,'OPEN_LINK',{href:'https://other.example/a'});await settle();
+  assert.ok([...h.tabMap.values()].some(t=>t.url==='https://other.example/a'));
+});
+test('a pop-up on the same website is allowed unless it quickly moves to another website',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
+  await h.send(1,'TAP',{href:'https://akwam.ss/series'});
+  h.popup(54,'https://akwam.ss/player',1);await settle();assert.equal(h.tabMap.has(54),true);
+  assert.equal((await h.visit(54,'player')).data.recorded,true);
+  h.tabMap.get(54).url='https://ads.example/landing';await h.visit(54,'landing');await settle();
+  assert.equal(h.tabMap.has(54),false,'redirect to an ad site closes it');
+});
+test('a link tapped inside a new tab is never blocked',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
+  await h.send(1,'TAP',{href:'https://akwam.ss/series'});
+  h.popup(55,'https://akwam.ss/player',1);await h.visit(55,'player');
+  await h.send(55,'TAP',{href:'https://mirror.example/file'});h.tabMap.get(55).url='https://mirror.example/file';
+  assert.equal((await h.visit(55,'file')).data.recorded,true);assert.equal(h.tabMap.has(55),true);
+});
+test('pop-up blocking can be switched off, or allowed for one website',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
+  assert.equal((await h.send(1,'STATUS',{lite:true})).data.settings.blockPopups,true);
+  await h.send(1,'SETTINGS',{blockPopups:false});
+  await h.send(1,'TAP',{});h.popup(56,'https://ads.example/',1);await settle();assert.equal(h.tabMap.has(56),true);
+  await h.send(1,'SETTINGS',{blockPopups:true});await h.send(1,'POPUP_ALLOW');
+  const status=(await h.send(1,'STATUS',{lite:true})).data;assert.equal(status.popupsAllowed,true);assert.deepEqual(Array.from(status.settings.popupAllowedHosts),['akwam.ss']);
+  await h.send(1,'TAP',{});h.popup(57,'https://ads.example/',1);await settle();assert.equal(h.tabMap.has(57),true);
+  await h.send(1,'POPUP_ALLOW');await h.send(1,'TAP',{});h.popup(58,'https://ads.example/',1);await settle();assert.equal(h.tabMap.has(58),false);
+});
+test('without opener information the most recently tapped tab is used',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
+  await h.send(1,'TAP',{});h.popup(59,'https://ads.example/',undefined);await settle();
+  assert.equal(h.tabMap.has(59),false);assert.equal(h.tabMap.get(1).active,true);
+});
+test('a freshly opened pop-up can be closed from its first signal',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
+  await h.send(1,'TAP',{});h.popup(60,'about:blank',1);h.tabMap.get(60).url='https://ads.example/x';
+  await h.send(60,'FRESH_TAB');await settle();assert.equal(h.tabMap.has(60),false);
 });

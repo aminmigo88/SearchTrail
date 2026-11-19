@@ -35,6 +35,9 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
   settingsPage.append(el("p","muted","Tap the arrow to return. Tap ☰ for this menu, or swipe ☰ to the side to hide it; drag out or tap its tab to bring it back. Drag the arrow to move both buttons. Placement is saved across websites."));
   const paused=el("input");paused.type="checkbox";const pl=el("label");pl.append(paused,document.createTextNode("Pause recording"));settingsPage.append(pl);
   const intercept=el("input");intercept.type="checkbox";const il=el("label");il.append(intercept,document.createTextNode("Open Google results in new tabs"));settingsPage.append(il);
+  const popups=el("input");popups.type="checkbox";const ppl=el("label");ppl.append(popups,document.createTextNode("Block pop-ups"));settingsPage.append(ppl);
+  const popupSite=el("button","","Allow pop-ups on this site");settingsPage.append(popupSite);
+  settingsPage.append(el("p","muted","Stops websites from opening other websites in new tabs when you tap. Links you tap, such as downloads and documents, still open."));
   const status=el("p","good");settingsPage.append(status);
   const controls=el("div","controls");settingsPage.append(controls);
   const exclude=el("button","","Exclude this site"),exportBtn=el("button","","Export history"),clear=el("button","danger","Delete history");const importBtn=el("button","","Restore backup"),repair=el("button","","Repair history index"),file=el("input");file.type="file";file.accept=".json,application/json";file.hidden=true;
@@ -101,6 +104,8 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
     back.onclick=()=>action(async()=>{const r=await call({type:"RETURN"});if(r?.none)throw Error("No source page was recorded. Open the menu for your trail and history.");onClose();});
     sourceText.textContent=s.source?(s.sourceOpen?"Open source: ":"Load saved source: ")+(s.source.title||s.source.url):"The arrow returns directly; ☰ opens your trail, history and bookmarks.";
     paused.checked=s.settings.paused;intercept.checked=s.settings.interceptGoogle;
+    popups.checked=s.settings.blockPopups!==false;popupSite.hidden=!popups.checked||!s.host;
+    popupSite.textContent=s.popupsAllowed?"Block pop-ups on this site":"Allow pop-ups on this site";
     placement.value=s.settings.placement||"bottom-right";clearance.value=s.settings.clearance??16;
     status.textContent=s.settings.paused?"Recording paused":s.excluded?"This site is excluded":"Recording permitted, non-private webpages";
     exclude.textContent=s.settings.excludedHosts.includes(s.host)?"Include this site":"Exclude this site";
@@ -152,6 +157,8 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
   load.onclick=()=>{const g=generation;load.disabled=true;action(async()=>{const data=await call({type:"LIST",query:query.value,cursor,rootId:historyRoot});if(g===generation)appendRows(data);}).finally(()=>{load.disabled=false;});};
   paused.onchange=()=>action(async()=>{await call({type:"SETTINGS",paused:paused.checked});await refresh();});
   intercept.onchange=()=>action(async()=>{await call({type:"SETTINGS",interceptGoogle:intercept.checked});await refresh();});
+  popups.onchange=()=>action(async()=>{await call({type:"SETTINGS",blockPopups:popups.checked});await refresh();});
+  popupSite.onclick=()=>action(async()=>{await call({type:"POPUP_ALLOW"});await refresh();});
   placement.onchange=()=>action(()=>call({type:"SETTINGS",placement:placement.value}));
   clearance.onchange=()=>action(()=>call({type:"SETTINGS",clearance:Number(clearance.value)}));
   exclude.onclick=()=>action(async()=>{await call({type:"EXCLUDE"});await refresh();});

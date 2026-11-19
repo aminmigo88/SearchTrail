@@ -23,7 +23,7 @@ globalThis.SearchTrailCSS=`
 .panel::before {content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:-1;
   background:linear-gradient(155deg,rgba(255,255,255,.42),rgba(255,255,255,0) 34%,rgba(255,255,255,0) 72%,rgba(255,255,255,.16));}
 @keyframes st-in {from{opacity:0;transform:translateY(10px) scale(.96);}to{opacity:1;transform:none;}}
-@media (prefers-reduced-motion:reduce){.panel{animation:none;}.launcher,.launcher.pressed{transition:none;}}
+@media (prefers-reduced-motion:reduce){.panel{animation:none;}.launcher,.launcher.pressed,.popup-note{transition:none;}}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.st{--glass:rgba(246,248,253,.97);}}
 @media (prefers-reduced-transparency:reduce){.st{--glass:rgba(246,248,253,.98);}}
 .popup .panel {width:370px;max-width:100vw;height:min(580px,95dvh);border-radius:0;border:0;box-shadow:inset 0 1px 1px var(--sheen);animation:none;}
@@ -84,6 +84,15 @@ label{display:flex;gap:8px;align-items:center;margin:14px 0;font-size:13px;}.set
 .menu-launcher.tucked{width:14px;margin-left:48px;border-radius:7px;font-size:0;}
 .menu-launcher.tucked.edge-left{margin-left:-12px;}
 .menu-launcher.tucked::after{content:"";width:3px;height:20px;border-radius:2px;background:#1a6dff;opacity:.6;}
+/* "Pop-up blocked": a pop-up window symbol with a red cross, shown briefly above the buttons
+   (below them when they sit at the top of the screen). */
+.popup-note{position:absolute;left:5px;bottom:calc(100% + 8px);width:40px;height:40px;border-radius:14px;display:flex;align-items:center;justify-content:center;pointer-events:none;
+  background:rgba(255,255,255,.14);-webkit-backdrop-filter:blur(3px) saturate(1.8);backdrop-filter:blur(3px) saturate(1.8);border:1px solid rgba(255,255,255,.55);
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.7),0 0 0 .5px rgba(15,25,45,.16),0 6px 16px rgba(15,25,45,.16);
+  opacity:0;transform:translateY(6px) scale(.9);transition:opacity .18s ease,transform .18s ease;}
+.dock.menu-hidden .popup-note{bottom:58px;}
+.dock.at-top .popup-note,.dock.at-top.menu-hidden .popup-note{bottom:auto;top:calc(100% + 8px);transform:translateY(-6px) scale(.9);}
+.popup-note.show,.dock.at-top .popup-note.show{opacity:1;transform:none;}
 .fold{font-size:11px;min-height:32px;padding:5px 8px;margin-top:4px;}
 .save{min-width:44px;padding:4px;font-size:20px;}
 .launcher.bad{color:#e5484d;}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #72a1ff;outline-offset:2px;}

@@ -5,11 +5,53 @@
    idx      = {v,days,count} list of day buckets and total visit count */
 "use strict";
 const B = browser, C = SearchTrailCore, L = B.storage.local;
-const DEFAULTS = {paused:false, interceptGoogle:true, excludedHosts:[], placement:"bottom-right", clearance:16, menuHidden:false};
+const DEFAULTS = {paused:false, interceptGoogle:true, excludedHosts:[], placement:"bottom-right", clearance:16, menuHidden:false, blockPopups:true, popupAllowedHosts:[]};
 const SEG = 250, TREE_BUDGET = 1000, TREE_SHOW = 300, MAX_ANCESTORS = 150, TAB_MEMORY = 100, PAGE = 100;
 // recovered: interrupted delete/clear journals were checked in this background lifetime.
 let work = Promise.resolve(), cachedSettings = null, indexed = false, recovered = false;
 const explicitTabs = new Set();
+/* Pop-up tabs. guard.js stops most pop-ups inside the page; this closes the ones that get
+   through. A new tab counts as a pop-up only when a page tap came just before it, it goes to
+   another website than the page, it is not the link that was tapped, and SearchTrail did not
+   open it. Long-press "Open in New Tab" and links you tap are left alone. */
+const POPUP_WINDOW = 2500;
+const taps = new Map(), popupCandidates = new Map(), ourTabs = new Map(), blockedTabs = new Set();
+let creatingUntil = 0;
+function prune(map, age=60000) { const now=Date.now(); for(const [k,v] of map) if(now-(v.at??v)>age) map.delete(k); }
+function tapBefore(at, tabId) {
+  const near=t=>t&&t.at>=at-POPUP_WINDOW&&t.at<=at+1000;
+  if(Number.isInteger(tabId)) return near(taps.get(tabId))?{tabId,...taps.get(tabId)}:null;
+  let best=null;
+  for(const [id,t] of taps) if(near(t)&&(!best||t.at>best.at)) best={tabId:id,...t};
+  return best;
+}
+async function decidePopup(tabId, url) {
+  const c=popupCandidates.get(tabId);if(!c)return false;
+  if(!c.deciding) {
+    const web=C.webURL(url);if(!web)return false; // still blank: wait for the real address
+    c.deciding=judgePopup(tabId,c,web).then(verdict=>{
+      if(verdict==="later")c.deciding=null;else popupCandidates.delete(tabId);
+      return verdict;
+    },()=>{popupCandidates.delete(tabId);return "allow";});
+  }
+  return (await c.deciding)==="close";
+}
+async function judgePopup(tabId, c, web) {
+  if(ourTabs.has(tabId)||Date.now()-c.at>20000)return "allow";
+  const own=taps.get(tabId);if(own&&own.at>=c.at)return "allow"; // you are using that tab yourself
+  const opt=await settings();if(!opt.blockPopups)return "allow";
+  const t=tapBefore(c.at,c.opener);if(!t)return "allow";
+  let opener;try {opener=await B.tabs.get(t.tabId);} catch {return "allow";}
+  if(opener.incognito||!C.webURL(opener.url)||C.excluded(opener.url,opt.popupAllowedHosts||[]))return "allow";
+  // Same website for now: keep watching briefly in case it quickly moves on to another site.
+  if(C.sameSite(opener.url,web))return Date.now()-c.at<8000?"later":"allow";
+  if(t.href&&C.sameSite(t.href,web))return "allow"; // the link you tapped, e.g. a download elsewhere
+  blockedTabs.add(tabId);
+  await B.tabs.remove(tabId).catch(()=>{});
+  await B.tabs.update(t.tabId,{active:true}).catch(()=>{});
+  B.tabs.sendMessage(t.tabId,{type:"POPUP_BLOCKED"},{frameId:0})?.catch?.(()=>{});
+  return "close";
+}
 function queue(fn) { const next=work.then(fn); work=next.catch(()=>{}); return next; }
 const stateKey = n => "tab:"+n;
 const nodeKey = n => "visit:"+n;
@@ -153,7 +195,9 @@ async function sourceStatus(tab,s) {
   return {currentId:current?.id||null,source,canReturn:!!source,sourceOpen:source ? !!await liveTab(source,tab.id) : false};
 }
 async function newTab(url,parentId=null,restoreId=null) {
+  creatingUntil=Date.now()+2000;
   const created=await B.tabs.create({url,active:true});
+  ourTabs.set(created.id,Date.now());
   if(created.incognito) throw Error("SearchTrail is off in Private Browsing.");
   explicitTabs.add(created.id);
   await putState(created.id,{token:id(),pending:{url,parentId,restoreId,opener:!!parentId,at:Date.now()},documents:{}});
@@ -276,12 +320,14 @@ async function handle(message,sender) {
   const opt=await settings();let s=await state(tabId);
   switch(message.type) {
     case "STATUS": {
-      const base={settings:opt,host:C.webURL(tab.url)?new URL(tab.url).hostname:"",excluded:C.excluded(tab.url,opt.excludedHosts)};
+      const base={settings:opt,host:C.webURL(tab.url)?new URL(tab.url).hostname:"",excluded:C.excluded(tab.url,opt.excludedHosts),popupsAllowed:C.excluded(tab.url,opt.popupAllowedHosts||[])};
       return message.lite ? base : {...await sourceStatus(tab,s),...base};
     }
     case "VISIT": {
       if(!fromPage || typeof message.navigationId!=="string" || !/^[a-zA-Z0-9-]{1,100}$/.test(message.navigationId))throw Error("Invalid visit.");
       const url=C.webURL(message.url);if(!url || !sameURL(url,tab.url))return {recorded:false,accepted:false};
+      // Pages in a pop-up tab that is being closed are never saved.
+      if(blockedTabs.has(tabId)||(popupCandidates.has(tabId)&&await decidePopup(tabId,url)))return {recorded:false};
       if(opt.paused || C.excluded(url,opt.excludedHosts)) {
         await putState(tabId,{token:s.token||id(),url,navigationId:message.navigationId,currentId:null,documents:{}});
         return {recorded:false};
@@ -423,7 +469,7 @@ async function handle(message,sender) {
     }
     case "SETTINGS": {
       const patch={};
-      for(const key of ["paused","interceptGoogle","menuHidden"])if(typeof message[key]==="boolean")patch[key]=message[key];
+      for(const key of ["paused","interceptGoogle","menuHidden","blockPopups"])if(typeof message[key]==="boolean")patch[key]=message[key];
       if(["bottom-right","bottom-left","top-right","top-left"].includes(message.placement))patch.placement=message.placement;
       if(Number.isFinite(message.clearance))patch.clearance=Math.max(8,Math.min(120,Math.round(message.clearance)));
       await saveSettings({...opt,...patch});return {};
@@ -434,12 +480,33 @@ async function handle(message,sender) {
       const hosts=opt.excludedHosts.includes(host)?opt.excludedHosts.filter(h=>h!==host):[...opt.excludedHosts,host];
       await saveSettings({...opt,excludedHosts:hosts});return {};
     }
+    case "POPUP_ALLOW": {
+      const site=C.siteOf(tab.url);if(!site)throw Error("Open a website first.");
+      const list=opt.popupAllowedHosts||[];
+      await saveSettings({...opt,popupAllowedHosts:list.includes(site)?list.filter(h=>h!==site):[...list,site]});return {};
+    }
     default:throw Error("Unknown action.");
   }
 }
-B.runtime.onMessage.addListener((m,s)=>queue(()=>handle(m,s)).then(data=>({ok:true,data}),e=>({ok:false,error:e.message||String(e)})));
+// Pop-up signals from guard.js are answered at once, outside the serialized queue.
+function popupMessage(m,s) {
+  const tabId=s.tab?.id;if(!Number.isInteger(tabId)||s.tab.incognito)return {};
+  if(m.type==="TAP"){prune(taps);taps.set(tabId,{at:Date.now(),href:C.webURL(m.href)});}
+  if(m.type==="FRESH_TAB")decidePopup(tabId,s.url||s.tab.url).catch(()=>{});
+  if(m.type==="POPUP_NOTE")B.tabs.sendMessage(tabId,{type:"POPUP_BLOCKED"},{frameId:0})?.catch?.(()=>{});
+  return {};
+}
+B.runtime.onMessage.addListener((m,s)=>{
+  if(m&&["TAP","FRESH_TAB","POPUP_NOTE"].includes(m.type))return Promise.resolve({ok:true,data:popupMessage(m,s)});
+  return queue(()=>handle(m,s)).then(data=>({ok:true,data}),e=>({ok:false,error:e.message||String(e)}));
+});
 B.tabs.onCreated.addListener(tab=>{
   if(tab.incognito)return;
+  if(Date.now()<creatingUntil)ourTabs.set(tab.id,Date.now());
+  else if(tapBefore(Date.now(),tab.openerTabId)){
+    prune(popupCandidates,30000);popupCandidates.set(tab.id,{opener:tab.openerTabId,at:Date.now()});
+    if(C.webURL(tab.url))decidePopup(tab.id,tab.url).catch(()=>{});
+  }
   queue(async()=>{
     if(explicitTabs.delete(tab.id))return;
     let parent=null;
@@ -447,5 +514,8 @@ B.tabs.onCreated.addListener(tab=>{
     await putState(tab.id,{token:id(),documents:{},pending:parent?{parentId:parent.id,opener:true,at:Date.now()}:null});
   }).catch(()=>{});
 });
-B.tabs.onRemoved.addListener(tabId=>queue(()=>B.storage.session?.remove(stateKey(tabId))).catch(()=>{}));
+B.tabs.onRemoved.addListener(tabId=>{
+  taps.delete(tabId);popupCandidates.delete(tabId);ourTabs.delete(tabId);setTimeout(()=>blockedTabs.delete(tabId),10000);
+  queue(()=>B.storage.session?.remove(stateKey(tabId))).catch(()=>{});
+});
 B.runtime.onStartup.addListener(()=>queue(()=>B.storage.session?.clear()).catch(()=>{}));

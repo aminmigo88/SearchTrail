@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "SearchTrail",
-  "version": "0.3.2",
-  "description": "Return to your source page; open the menu for browsing trails, bookmarks and local history.",
+  "version": "0.3.3",
+  "description": "Return to your source page; open the menu for browsing trails, bookmarks and local history. Blocks pop-up tabs.",
   "permissions": [
     "tabs",
     "storage",
@@ -30,6 +30,19 @@
     "512": "icons/icon-512.png"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "core.js",
+        "guard.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    },
     {
       "matches": [
         "http://*/*",
