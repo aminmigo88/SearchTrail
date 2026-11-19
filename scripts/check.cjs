@@ -6,3 +6,5 @@ const assets=[...manifest.background.scripts,...manifest.content_scripts.flatMap
 for(const f of assets){if(!fs.existsSync(path.join(root,f)))throw Error('Missing asset '+f);}
 for(const file of fs.readdirSync(path.join(__dirname,'..','tests')).filter(x=>x.endsWith('.cjs'))){cp.execFileSync(process.execPath,['--check',path.join(__dirname,'..','tests',file)],{stdio:'inherit'});}
 console.log('JavaScript syntax, manifest JSON and required assets passed.');
+
+for(const file of ['package.json','package-lock.json']){if(JSON.parse(fs.readFileSync(path.join(root,'..',file))).version!==manifest.version)throw Error('Version mismatch: '+file);}

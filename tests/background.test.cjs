@@ -249,3 +249,68 @@ test('lite status skips the source lookup',async()=>{
   const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');
   const d=(await h.send(1,'STATUS',{lite:true})).data;assert.equal(d.source,undefined);assert.equal(d.settings.placement,'bottom-right');
 });
+
+
+test('upgrade splits 1500-node trails and daily history into bounded chunks',async()=>{
+  const local={idx:{v:1,days:[0],count:1500}};
+  for(let i=0;i<1500;i++)local['visit:m'+i]={id:'m'+i,url:'https://example.com/'+i,title:'page '+i,at:1000+i,parentId:i?'m'+(i-1):null,rootId:'m0',graphVersion:2};
+  const h=harness(local);h.add(1,'https://example.com/1499');h.session['tab:1']={token:'t',url:'https://example.com/1499',navigationId:'m1499',currentId:'m1499',documents:{m1499:'m1499'}};
+  assert.equal((await h.send(1,'LIST')).data.total,1500);
+  assert.ok(Object.entries(h.local).filter(([k])=>k.startsWith('seg:')).every(([,s])=>s.ids.length<=250));
+  assert.ok(Object.entries(h.local).filter(([k,v])=>k.startsWith('day:')&&Array.isArray(v)).every(([,v])=>v.length<=250));
+  let maxRead=0;const get=h.B.storage.local.get;h.B.storage.local.get=async keys=>{if(Array.isArray(keys))maxRead=Math.max(maxRead,keys.filter(k=>k.startsWith('visit:')).length);return get(keys);};
+  const t=(await h.send(1,'TREE')).data;assert.ok(maxRead<=1000);assert.equal(t.hidden,true);assert.ok(t.earlierId);
+  const older=(await h.send(1,'TREE',{focusId:t.earlierId})).data;assert.ok(older.ancestors.some(n=>n.id===t.earlierId));
+});
+test('delete interruption recovers after background restart without double decrement',async()=>{
+  const h=harness();for(let i=0;i<4;i++){h.add(1,'https://example.com/'+i);await h.visit(1,'n'+i);}
+  const remove=h.B.storage.local.remove;let fail=true;h.B.storage.local.remove=async keys=>{if(fail){fail=false;throw Error('Interrupted');}return remove(keys);};
+  assert.equal((await h.send(1,'DELETE',{id:'n1'})).ok,false);
+  const restarted=harness(h.local);restarted.add(1,'https://example.com/3');
+  assert.equal((await restarted.send(1,'DELETE',{id:'n1'})).ok,true);
+  const list=(await restarted.send(1,'LIST')).data;assert.equal(list.total,3);assert.equal(list.items.length,3);assert.equal(h.local.pendingDelete,undefined);
+});
+test('truncated tab memory never confuses an old repeated URL with its newer occurrence',async()=>{
+  const h=harness();h.add(1,'https://example.com/origin');await h.visit(1,'origin');
+  for(let i=1;i<=120;i++){h.tabMap.get(1).url=(i===1||i===70)?'https://example.com/repeated':'https://example.com/p'+i;await h.visit(1,'n'+i,{kind:'route'});}
+  h.tabMap.get(1).url='https://example.com/repeated';await h.visit(1,'old-reload',{kind:'traverse'});
+  assert.equal((await h.send(1,'TREE')).data.currentId,'old-reload');assert.equal((await h.send(1,'STATUS')).data.source,null);
+  // Exact identity still restores an old node even after its transient mapping was evicted.
+  await h.visit(1,'n1',{kind:'traverse'});assert.equal((await h.send(1,'STATUS')).data.source.id,'origin');
+});
+test('wide partial trees are labelled and all branches remain accessible by paged trail history',async()=>{
+  const h=harness();h.add(1,'https://example.com/root');await h.visit(1,'root');
+  for(let i=1;i<=1100;i++){h.tabMap.get(1).url='https://example.com/root';await h.visit(1,'root',{kind:'traverse'});h.tabMap.get(1).url='https://example.com/child'+i;await h.visit(1,'kid'+i,{kind:'route'});}
+  h.tabMap.get(1).url='https://example.com/root';await h.visit(1,'root',{kind:'traverse'});
+  const t=(await h.send(1,'TREE')).data;assert.equal(t.partial,true);assert.ok(t.total<1101);
+  const seen=new Set();let cursor=null;
+  do{const r=(await h.send(1,'LIST',{rootId:t.rootId,cursor})).data;for(const n of r.items){assert.ok(!seen.has(n.id));seen.add(n.id);}cursor=r.more?r.cursor:null;}while(cursor);
+  assert.equal(seen.size,1101);
+});
+test('bookmarks deduplicate, survive deleted history and reopen without stale ancestry',async()=>{
+  const h=harness();h.add(1,'https://example.com/book');await h.visit(1,'book');await h.send(1,'BOOKMARK_SAVE');await h.send(1,'BOOKMARK_SAVE');
+  const items=(await h.send(1,'BOOKMARKS')).data.items;assert.equal(items.length,1);
+  await h.send(1,'CLEAR');assert.equal((await h.send(1,'BOOKMARKS')).data.items.length,1);
+  assert.equal((await h.send(1,'BOOKMARK_OPEN',{id:items[0].id})).ok,true);assert.equal(h.tabMap.get(10).url,'https://example.com/book');
+  await h.send(1,'BOOKMARK_DELETE',{id:items[0].id});assert.equal((await h.send(1,'BOOKMARKS')).data.items.length,0);
+});
+test('backup restore is additive, repeatable, rejects dangerous URLs and preserves bookmarks',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');h.tabMap.get(1).url='https://example.com/b';await h.visit(1,'b',{kind:'route'});await h.send(1,'BOOKMARK_SAVE');
+  const backup=(await h.send(1,'EXPORT')).data;await h.send(1,'CLEAR');
+  assert.equal((await h.send(1,'IMPORT',{data:backup})).data.added,2);assert.equal((await h.send(1,'IMPORT',{data:backup})).data.added,0);
+  assert.equal((await h.send(1,'BOOKMARKS')).data.items.length,1);await h.visit(1,'b',{kind:'traverse'});assert.equal((await h.send(1,'STATUS')).data.source.id,'a');
+  backup.visits[0].url='javascript:alert(1)';assert.equal((await h.send(1,'IMPORT',{data:backup})).ok,false);assert.equal((await h.send(1,'LIST')).data.total,2);
+});
+test('private tabs cannot access bookmarks, import backups or repair indexes',async()=>{
+  const h=harness();h.add(1,'https://example.com/secret',{incognito:true});
+  for(const type of ['BOOKMARKS','BOOKMARK_SAVE','BOOKMARK_OPEN','BOOKMARK_DELETE','IMPORT','REPAIR'])assert.equal((await h.send(1,type)).ok,false);
+});
+test('history paging handles clock rollback and title edits across chunks',async()=>{
+  const h=harness();h.add(1,'https://example.com/0');
+  for(let i=0;i<600;i++){h.tabMap.get(1).url='https://example.com/'+i;await h.visit(1,'clock'+i);}
+  await h.send(1,'TITLE',{navigationId:'clock599',title:'Unique revised title'});
+  assert.equal((await h.send(1,'LIST',{query:'unique revised'})).data.items[0].id,'clock599');
+  const backup=(await h.send(1,'EXPORT')).data;backup.visits.push({id:'older',at:1,url:'https://example.com/older',title:'Old clock',rootId:'older'});
+  assert.equal((await h.send(1,'IMPORT',{data:backup})).ok,true);
+  assert.equal((await h.send(1,'LIST',{query:'old clock'})).data.items[0].id,'older');
+});

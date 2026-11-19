@@ -2,7 +2,7 @@ name: Build SearchTrail for iPhone
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, "codex/**"]
     paths:
       - 'extension/**'
       - 'scripts/**'

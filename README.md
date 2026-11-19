@@ -1,8 +1,18 @@
-# SearchTrail 0.2.0 — Safari browsing trails
+# SearchTrail 0.3.0 — Safari browsing trails
 
-Tap the floating arrow to return directly to the page that led here. Hold it for a branching trail, saved history and settings. Sources can be any permitted HTTP/HTTPS website.
+Tap the floating arrow to return directly to the page that led here. Tap the separate ☰ button for a branching trail, saved history, bookmarks and settings. Holding the arrow is still an optional shortcut. Sources can be any permitted HTTP/HTTPS website.
 
-## Changes from 0.1
+## New in 0.3
+
+- Separate source and menu buttons, layered over the panel. The sheet extends down behind them; section navigation uses the remaining footer space. Placement moves both buttons together.
+- SearchTrail bookmarks: save the current page or ☆ a history row, search, open and remove. Bookmarks survive clearing history. Safari’s native bookmarks and native bookmark panel are not accessible through this feature.
+- JSON export includes bookmarks; Restore backup merges SearchTrail backups without deleting existing visits. Repeated imports do not duplicate visits. Conflicting IDs are rejected. Import limit: 50 MB in the interface and 100,000 visits.
+- Recovery journal for interrupted deletion/clear; Repair history index rebuilds derived data while retaining visits.
+- Bounded 250-row history chunks and trail segments, including migration of existing data. Truncated tab memory no longer guesses the identity of repeated URLs.
+- Large trees clearly label partial views. Earlier path walks farther back; All trail pages opens paged history filtered to that trail. Branches can collapse. Deep paths stop adding horizontal indentation.
+- Version displayed from the manifest; iOS marketing version derives from the same manifest. Build number uses the Actions run number.
+
+## Navigation
 
 - **Tap:** return to the immediate source without opening the panel. An existing source tab is activated directly. If that page is no longer open, its saved URL loads in the current tab. Result tabs are not closed automatically.
 - **Hold for half a second:** open the trail tree. The current path is highlighted; sibling branches remain visible. Tap any saved node to revisit it. To jump farther back than the immediate source, select an ancestor in the tree.
@@ -16,13 +26,17 @@ Tap the floating arrow to return directly to the page that led here. Hold it for
 
 1. Download the unsigned IPA from a successful [GitHub Actions build](https://github.com/aminmigo88/SearchTrail/actions). Extract the artifact ZIP if downloading from GitHub.
 2. Import the IPA into Feather. Sign with your working certificate/profile and **retain embedded app extensions**. Both the host and `.appex` need suitable signing/provisioning.
-3. To preserve data, install over the old version using the same signing identity and bundle identifiers; do not uninstall first. Signer behavior can affect data retention. Export valuable history before upgrading. JSON import is not implemented yet.
+3. To preserve data, install over the old version using the same signing identity and bundle identifiers; do not uninstall first. Signer behavior can affect data retention. Export valuable history before upgrading. Version 0.3 can restore SearchTrail JSON backups.
 4. Open SearchTrail once; enable it and website access in **Settings → Apps → Safari → Extensions**. Keep Private Browsing access off.
 5. Reload existing Safari webpages so they use the new content script. Test with fresh links; older pages cannot supply missing parent relationships retroactively.
 
 No certificate, provisioning profile or private key belongs in this repository. Builds are unsigned.
 
 ## Device acceptance checks
+
+- Open ☰ directly and confirm the arrow still returns to the source while the panel is open. Check that both buttons remain touchable above the sheet at all four placements.
+- Save a bookmark, clear history, reopen the bookmark. Export and restore a backup. Confirm Safari bookmarks are unchanged.
+- Check portrait/landscape and keyboard appearance at narrow widths; the bottom navigation and floating buttons must not overlap.
 
 - From any ordinary website, open a link in the same tab. Tap the arrow: it should load the source in this tab. If the source still exists in another tracked tab, that tab should activate instead.
 - On Google, open several results. A tap on each should return directly to its search. Open a second search and verify each result returns to the correct source.
@@ -36,7 +50,7 @@ No certificate, provisioning profile or private key belongs in this repository. 
 
 Page nodes contain a title, full URL, timestamp and (when established) a parent node ID. The graph and history are stored locally in extension storage. Tab identities and document mappings are temporary session data. No backend, analytics or remote scripts.
 
-Relationships come from observed link taps, validated same-tab referrers, known document restoration and Safari's opener metadata. A navigation with no reliable parent starts a new tree. Reloads/restores reuse a known node instead of adding a loop. Separate newly loaded visits to the same URL can still be distinct nodes. Version 0.2 is a graph of observed pages, not a timestamped log of every back-button action.
+Relationships come from observed link taps, validated same-tab referrers, known document restoration and Safari's opener metadata. A navigation with no reliable parent starts a new tree. Reloads/restores reuse a known node instead of adding a loop. Separate newly loaded visits to the same URL can still be distinct nodes. SearchTrail is a graph of observed pages, not a timestamped log of every back-button action.
 
 Private tabs cannot record, read normal history or change settings. Pausing/excluding prevents recording and clears the current source relationship for that page. Deleting history affects SearchTrail only, not Safari History.
 
@@ -49,7 +63,7 @@ Private tabs cannot record, read normal history or change settings. Pausing/excl
 - Website same-tab behavior is preserved; links explicitly requesting a new tab are managed to retain their source. Site-specific handlers on such links may behave differently. Google interception can be disabled in Settings.
 - Visible-page route changes are checked every 750 ms. Same-URL history-state changes are not distinguished. The extension does not modify website `history.state` or intercept POST form submissions.
 - Old visit records lack parent IDs. Updating cannot reconstruct their trees. Session source matching resets after a browser restart; persisted graphs remain and their saved URLs can be reopened.
-- Tree view loads at most about 1,000 nearby pages of a trail and displays at most 300, with up to 150 ancestors; older pages of a very long trail are noted as not shown. History loads 100 pages at a time. Saved history is indexed by day and by trail segment, so the button, tree and History list do not slow down as history grows. A search with few matches still checks older days until it fills a page. The first launch after updating indexes existing history once. No automatic deletion; export backups. Removing extension data/uninstalling can remove it.
+- Tree view loads at most about 1,000 nearby pages of a trail and displays at most 300, with up to 150 ancestors; older pages of a very long trail are noted as not shown. History loads 100 pages at a time. Saved history is indexed by day and by trail segment, with bounded data chunks. Index metadata and rare-match searches still grow with stored history; performance is not constant for every operation. A search with few matches still checks older days until it fills a page. The first launch after updating indexes existing history once. No automatic deletion; export backups. Removing extension data/uninstalling can remove it.
 - UI checks use desktop WebKit with a mobile viewport and simulated extension APIs. Safari/iPhone signing, real touch behavior, viewport/keyboard handling and extension transport require device testing.
 
 ## Build and verify
@@ -65,7 +79,7 @@ npm run test:ui
 bash scripts/build-ios.sh
 ```
 
-The workflow runs logic and WebKit interface checks on Linux, then compiles on macOS for real iPhones and validates the embedded Safari extension before publishing an unsigned IPA. It runs on source/build changes on `main` and supports manual dispatch. Standard GitHub macOS Actions allowance applies.
+The workflow runs logic and WebKit interface checks on Linux, then compiles on macOS for real iPhones and validates the embedded Safari extension before publishing an unsigned IPA. It runs on source/build changes on `main` and `codex/**` and supports manual dispatch. Standard GitHub macOS Actions allowance applies.
 
 The stable bundle IDs are `app.searchtrail.SearchTrail` and `app.searchtrail.SearchTrail.Extension` before re-signing.
 
