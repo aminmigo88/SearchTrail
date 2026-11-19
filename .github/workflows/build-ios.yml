@@ -1,0 +1,35 @@
+name: Build SearchTrail for iPhone
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'extension/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'package.json'
+      - '.github/workflows/build-ios.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify source and behavior
+        run: |
+          npm run check
+          npm test
+      - name: Build unsigned iPhone package
+        run: bash scripts/build-ios.sh
+      - name: Save iPhone package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTrail-unsigned-IPA
+          path: dist/SearchTrail-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
