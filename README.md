@@ -49,7 +49,7 @@ Private tabs cannot record, read normal history or change settings. Pausing/excl
 - Website same-tab behavior is preserved; links explicitly requesting a new tab are managed to retain their source. Site-specific handlers on such links may behave differently. Google interception can be disabled in Settings.
 - Visible-page route changes are checked every 750 ms. Same-URL history-state changes are not distinguished. The extension does not modify website `history.state` or intercept POST form submissions.
 - Old visit records lack parent IDs. Updating cannot reconstruct their trees. Session source matching resets after a browser restart; persisted graphs remain and their saved URLs can be reopened.
-- Tree view displays at most 300 nodes including the current ancestry. History shows up to 20,000 matches in batches. Large-history performance is not yet measured. No automatic deletion; export backups. Removing extension data/uninstalling can remove it.
+- Tree view loads at most about 1,000 nearby pages of a trail and displays at most 300, with up to 150 ancestors; older pages of a very long trail are noted as not shown. History loads 100 pages at a time. Saved history is indexed by day and by trail segment, so the button, tree and History list do not slow down as history grows. A search with few matches still checks older days until it fills a page. The first launch after updating indexes existing history once. No automatic deletion; export backups. Removing extension data/uninstalling can remove it.
 - UI checks use desktop WebKit with a mobile viewport and simulated extension APIs. Safari/iPhone signing, real touch behavior, viewport/keyboard handling and extension transport require device testing.
 
 ## Build and verify
@@ -58,14 +58,14 @@ Private tabs cannot record, read normal history or change settings. Pausing/excl
 npm run check
 npm test
 # Optional WebKit interface checks (requires dependencies/browser binaries):
-npm install
+npm ci
 npx playwright install webkit
 npm run test:ui
 # macOS with Xcode:
 bash scripts/build-ios.sh
 ```
 
-The workflow runs logic and WebKit interface checks, compiles for real iPhones and validates the embedded Safari extension before publishing an unsigned IPA. It runs on source/build changes on `main` and supports manual dispatch. Standard GitHub macOS Actions allowance applies.
+The workflow runs logic and WebKit interface checks on Linux, then compiles on macOS for real iPhones and validates the embedded Safari extension before publishing an unsigned IPA. It runs on source/build changes on `main` and supports manual dispatch. Standard GitHub macOS Actions allowance applies.
 
 The stable bundle IDs are `app.searchtrail.SearchTrail` and `app.searchtrail.SearchTrail.Extension` before re-signing.
 
