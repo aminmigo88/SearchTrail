@@ -22,7 +22,7 @@
     host.style.setProperty("left",x+"px","important");host.style.setProperty("top",y+"px","important");
     const panelWidth=Math.min(400,v.width-16),panelHeight=Math.min(560,Math.max(180,v.height*.68),v.height-16);
     const panelY=top?v.y+8:v.y+v.height-panelHeight-8;
-    panelRoot.style.cssText=`position:fixed;z-index:0;left:${v.x+(v.width-panelWidth)/2}px;top:${panelY}px;--sheet-width:${panelWidth}px;--sheet-height:${panelHeight}px;--sheet-origin:${top?"top":"bottom"} center;direction:ltr;`;
+    panelRoot.style.cssText=`position:fixed;z-index:0;left:${v.x+(left?8:v.width-panelWidth-8)}px;top:${panelY}px;--sheet-width:${panelWidth}px;--sheet-height:${panelHeight}px;--sheet-origin:${top?"top":"bottom"} center;direction:ltr;`;
     // Reserve only the occupied corner of the footer/header, not a blank strip below the sheet.
     panelRoot.dataset.dock=top?"top":"bottom";
     panelRoot.style.setProperty("--dock-left",left?"128px":"0px");
