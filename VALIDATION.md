@@ -1,27 +1,19 @@
-# Validation — SearchTrail 0.1.0
+# SearchTrail 0.2.0 validation
 
 19 November 2026
 
-## Completed
+## Verified locally
 
-- JavaScript syntax checks for every extension script.
-- Manifest parsing and required resource existence checks.
-- 15 automated tests passed, covering URL validation, search identity, simultaneous searches, safe return/reopen behavior, repeated visits and branching, parallel writes, local-log persistence across background recreation, private tabs, pause/exclusions, deleted records, tab-ID reuse, quota errors, idempotent retry after state-write failure, and opener inheritance.
-- Bash syntax check for the macOS build script.
-- Python syntax compilation for scheme selection and IPA packaging.
-- Successful Xcode 26.6 Release build for physical arm64 iPhones, minimum iOS 16.4: [GitHub run 44514847061](https://github.com/aminmigo88/SearchTrail/actions/runs/44514847061), source commit `92f44d19079474600bbd94cf89bc2e1f574c63b2`.
-- First build exposed mismatched generated bundle identifiers; corrected to `app.searchtrail.SearchTrail` and `app.searchtrail.SearchTrail.Extension` and rebuilt successfully.
-- Downloaded artifact digest matches GitHub's SHA-256. IPA ZIP integrity, app and Safari extension Mach-O executables, executable permissions and bundle identifier relationship verified. Every packaged extension resource matches the source bytes.
-- IPA size: 291585 bytes. SHA-256: `0a62de6a1cc1575e5ad8a28c9d6a2e0b2dca1de039890e34db0d7874e1037306`.
-- Synthetic packaging fixture verifies valid structures are accepted and mismatched extension identifiers rejected.
+- All extension JavaScript parses; manifest resources exist.
+- 28 automated tests execute the production background logic with simulated WebExtension APIs.
+- Tests cover: independent Google/non-Google sources, same-tab and new-tab parent links, identical URLs in concurrent tabs, branching after Back, closed/repurposed sources, safe restored-node selection, source-tab reuse after restart, persisted graphs, legacy history, SPA routes, ambiguous traversals, deletion, private-tab denial, pause/exclusions, validated placement, concurrent writes, retry idempotency, storage failures and in-flight link-intent races.
 
-The behavior tests execute the actual background source with simulated WebExtension APIs. They are useful logic checks, not an iOS runtime test.
+## Build and browser checks
 
-## Not completed
+The GitHub workflow runs these logic checks plus the WebKit interface test, then compiles and packages the unsigned app. The interface test uses production content/UI code with simulated extension transport and a test-only open shadow root. It checks direct tap, long press without accidental navigation, tree branches, RTL isolation, saved placement after reload, smaller viewport containment, search and generic links. It is not an iOS Safari extension integration test.
 
-- Native IPA signing/install: no user's certificate was requested or used.
-- Safari/iPhone integration, permissions, navigation, persistence across an actual browser restart, and UI/device tests.
-- Visual browser smoke test: local Chromium could not launch in the execution environment.
-- Large-history performance, device export/save behavior, and signer-specific extension provisioning.
+Build result and packaged-file verification are recorded after the workflow finishes.
 
-The IPA is unsigned. Sign it with the embedded extension retained, then follow the device acceptance checklist in README.md before relying on it. Compilation and package inspection do not establish working Safari behavior.
+## Device status
+
+The user confirmed 0.1 works on their iPhone. Version 0.2 still needs the device checklist in README.md. No certificate was requested or used in cloud builds. Real Safari's native tab animation, software keyboard and touch interactions can differ from browser automation.
