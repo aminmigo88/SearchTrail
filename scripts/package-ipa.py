@@ -1,12 +1,18 @@
 import pathlib, plistlib, sys, zipfile
 app = pathlib.Path(sys.argv[1]).resolve()
 destination = pathlib.Path(sys.argv[2]).resolve()
+with (app / 'Info.plist').open('rb') as f:
+    app_info = plistlib.load(f)
+if not (app / app_info['CFBundleExecutable']).is_file():
+    raise SystemExit('Missing app executable')
 extensions = list((app / 'PlugIns').glob('*.appex'))
 safari = []
 for extension in extensions:
     with (extension / 'Info.plist').open('rb') as f:
         info = plistlib.load(f)
     if info.get('NSExtension', {}).get('NSExtensionPointIdentifier') == 'com.apple.Safari.web-extension':
+        if not info['CFBundleIdentifier'].startswith(app_info['CFBundleIdentifier'] + '.'):
+            raise SystemExit('Safari extension identifier must be a child of the app identifier')
         safari.append(extension)
         executable = extension / info['CFBundleExecutable']
         if not executable.is_file():

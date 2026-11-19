@@ -14,7 +14,7 @@ else
 fi
 xcrun "$task_packager" "$task_root/extension" \
   --project-location "$task_build/project" \
-  --app-name SearchTrail --bundle-identifier app.searchtrail.prototype \
+  --app-name SearchTrail --bundle-identifier app.searchtrail.SearchTrail \
   --ios-only --swift --copy-resources --no-open --no-prompt --force
 task_project="$(find "$task_build/project" -maxdepth 3 -name '*.xcodeproj' -type d -print -quit)"
 if [[ -z "$task_project" ]]; then echo 'No Xcode project was generated.' >&2; exit 1; fi
