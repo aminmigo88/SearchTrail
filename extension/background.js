@@ -189,7 +189,7 @@ async function treeFor(currentId,focusId) {
     if(selected.size<TREE_SHOW)selected.set(item.id,item);
     pending.push(...(children.get(item.id)||[]));
   }
-  return {items:[...selected.values()],ancestors,currentId,total,missingParent,hidden,partial:hidden,rootId:cur.rootId||cur.id,earlierId:ancestors[0]?.parentId||null};
+  return {items:[...selected.values()],ancestors,currentId,total,missingParent,hidden,partial:hidden,rootId:cur.rootId||cur.id,earlierId:missingParent?null:ancestors[0]?.parentId||null};
 }
 // Pages through day buckets newest first; stops as soon as one page is filled.
 async function listVisits(message) {
@@ -330,6 +330,7 @@ async function handle(message,sender) {
     case "BOOKMARKS": return {items:(await L.get("bookmarks")).bookmarks||[]};
     case "BOOKMARK_SAVE": {
       const n=message.id?await node(String(message.id)):await currentNode(tab,s);
+      if(message.id&&!n)throw Error("This visit is no longer saved.");
       const url=C.webURL(n?.url||tab.url);if(!url)throw Error("Open a website first.");
       const bookmarks=(await L.get("bookmarks")).bookmarks||[];
       if(!bookmarks.some(b=>b.url===url))bookmarks.unshift({id:id(),url,title:String(n?.title||tab.title||url).slice(0,1000),at:Date.now(),visitId:n?.id||null});
