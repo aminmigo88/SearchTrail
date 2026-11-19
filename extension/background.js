@@ -50,7 +50,7 @@ async function newTab(url,parentId=null,restoreId=null) {
   const created=await B.tabs.create({url,active:true});
   if(created.incognito) throw Error("SearchTrail is off in Private Browsing.");
   explicitTabs.add(created.id);
-  await putState(created.id,{token:id(),pending:{url,parentId,restoreId,at:Date.now()},documents:{}});
+  await putState(created.id,{token:id(),pending:{url,parentId,restoreId,opener:!!parentId,at:Date.now()},documents:{}});
   return created;
 }
 async function goNode(tab,s,n,{newWindow=false}={}) {
