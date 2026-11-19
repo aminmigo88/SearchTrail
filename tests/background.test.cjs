@@ -195,3 +195,8 @@ test('same-tab click captured during navigation still links to its sending docum
   assert.equal(r.ok,true);await h.visit(1,'dest',{referrer:'https://example.com/'});
   assert.equal((await h.send(1,'STATUS')).data.source.id,'source');
 });
+test('a managed new-tab redirect retains its known opener',async()=>{
+  const h=harness();h.add(1,'https://forum.example/thread');await h.visit(1,'source');
+  await h.send(1,'OPEN_LINK',{href:'https://redirect.example/go'});h.tabMap.get(10).url='https://destination.example/article';await h.visit(10,'destination');
+  assert.equal((await h.send(10,'STATUS')).data.source.id,'source');
+});

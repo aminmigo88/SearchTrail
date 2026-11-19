@@ -5,7 +5,7 @@
 ## Verified locally
 
 - All extension JavaScript parses; manifest resources exist.
-- 28 automated tests execute the production background logic with simulated WebExtension APIs.
+- 29 automated tests execute the production background logic with simulated WebExtension APIs.
 - Tests cover: independent Google/non-Google sources, same-tab and new-tab parent links, identical URLs in concurrent tabs, branching after Back, closed/repurposed sources, safe restored-node selection, source-tab reuse after restart, persisted graphs, legacy history, SPA routes, ambiguous traversals, deletion, private-tab denial, pause/exclusions, validated placement, concurrent writes, retry idempotency, storage failures and in-flight link-intent races.
 
 ## Build and browser checks

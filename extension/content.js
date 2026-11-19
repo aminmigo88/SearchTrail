@@ -4,7 +4,7 @@
   globalThis.__searchTrailLoaded=true;
   const C=SearchTrailCore;
   const makeId=()=>Array.from(crypto.getRandomValues(new Uint32Array(4)),n=>n.toString(16)).join("-");
-  let host,shadow,button,panelRoot,ui,open=false,options,lastURL,navId,lastTitle,failed,pendingVisit,inFlight=false,retryAt=0,dragging=false;
+  let host,shadow,button,panelRoot,ui,open=false,options,lastURL,navId,lastTitle,failed,pendingVisit,inFlight=false,retryAt=0,dragging=false,ready=false;
   const routes=[];
   async function call(message) {
     const response=await browser.runtime.sendMessage(message);
@@ -75,6 +75,7 @@
     document.documentElement.append(host);position();if(failed)reportError(Error(failed));
   }
   async function visit(force=false,kind="route") {
+    if(!ready)return;
     const url=location.href;
     if(!lastURL || url!==lastURL){
       if(kind==="traverse"){
@@ -129,7 +130,7 @@
     if(document.title!==lastTitle&&navId){lastTitle=document.title;call({type:"TITLE",title:lastTitle,navigationId:navId}).catch(reportError);}
   },750);
   call({type:"STATUS"}).then(s=>{
-    options=s;mount();const type=performance.getEntriesByType("navigation")[0]?.type;
+    options=s;ready=true;mount();const type=performance.getEntriesByType("navigation")[0]?.type;
     visit(false,type==="back_forward"?"traverse":type==="reload"?"reload":"load");
   }).catch(e=>{if(!e.message.includes("Private Browsing")){reportError(e);mount();}});
 })();
