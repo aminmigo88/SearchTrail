@@ -38,11 +38,22 @@
     const host = new URL(value).hostname.toLowerCase();
     return hosts.some(h => host === h || host.endsWith("." + h));
   }
+  // Page identity: the same address is the same page, ignoring the part after "#". For a
+  // Google search, the search itself (words, tab, results page) decides, because Google
+  // changes the rest of its address on its own.
+  function pageKey(value) {
+    const url=webURL(value);if(!url)return null;
+    const key=searchKey(url);if(key)return key;
+    const u=new URL(url);u.hash="";return u.href;
+  }
+  function samePage(a, b) {
+    const key=pageKey(a);return !!key && key===pageKey(b);
+  }
   function sameSearch(source, currentURL, rootState) {
     return !!source && searchKey(source.url) === searchKey(currentURL) &&
       source.token === rootState?.rootToken;
   }
-  const api = {webURL, searchKey, resultURL, excluded, sameSearch};
+  const api = {webURL, searchKey, resultURL, excluded, sameSearch, pageKey, samePage};
   root.SearchTrailCore = api;
   if (typeof module !== "undefined") module.exports = api;
 })(globalThis);

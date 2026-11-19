@@ -21,3 +21,17 @@ test('site exclusions match host boundaries',()=>{
   assert.equal(C.excluded('https://sub.example.com/a',['example.com']),true);
   assert.equal(C.excluded('https://notexample.com/a',['example.com']),false);
 });
+test('same address is the same page; the part after # is ignored; a new path is a different page',()=>{
+  assert.equal(C.samePage('https://wiki.example/Article','https://wiki.example/Article#History'),true);
+  assert.equal(C.samePage('https://wiki.example/Article#Intro','https://wiki.example/Article#History'),true);
+  assert.equal(C.samePage('https://wiki.example/Article','https://wiki.example/Article/Talk'),false);
+  assert.equal(C.samePage('https://shop.example/list?page=1','https://shop.example/list?page=2'),false);
+  assert.equal(C.samePage('javascript:alert(1)','javascript:alert(1)'),false);
+});
+test('a Google search is the same page while the search itself is unchanged',()=>{
+  const g='https://www.google.com/search?q=%D8%A7%D9%88%D9%82%D8%A7%D8%AA';
+  assert.equal(C.samePage(g,g+'&sei=abc&sca_esv=1#fpstate=ive&vld=cid:1'),true);
+  assert.equal(C.samePage(g,'https://www.google.com/search?q=other'),false);
+  assert.equal(C.samePage(g,g+'&tbm=isch'),false);
+  assert.equal(C.samePage(g,g+'&start=10'),false);
+});

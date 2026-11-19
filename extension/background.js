@@ -38,9 +38,11 @@ async function safeTab(tabId) {
   return tab;
 }
 function sameURL(a,b) { return !!C.webURL(a) && C.webURL(a)===C.webURL(b); }
+// Same page: same address ignoring "#…", or the same Google search (see core.js).
+const samePage=(a,b)=>C.samePage(a,b);
 async function currentNode(tab,s) {
   const n=await node(s.currentId);
-  return n && sameURL(n.url,tab.url) && sameURL(s.url,tab.url) ? n : null;
+  return n && samePage(n.url,tab.url) && samePage(s.url,tab.url) ? n : null;
 }
 // Full scan: used only for one-time index migration and export.
 async function allVisits() {
@@ -129,18 +131,25 @@ async function removeNode(n) {
 }
 async function liveTab(n,preferred) {
   const values=await B.storage.session.get(null);
-  const candidates=Object.entries(values).filter(([k,s])=>k.startsWith("tab:") && s.currentId===n.id && sameURL(s.url,n.url));
+  const candidates=Object.entries(values).filter(([k,s])=>k.startsWith("tab:") && s.currentId===n.id && samePage(s.url,n.url));
   candidates.sort(([a],[b])=>Number(b===stateKey(preferred))-Number(a===stateKey(preferred)));
   for(const [key,s] of candidates) {
     try {
       const t=await safeTab(Number(key.slice(4)));
-      if(s.token && sameURL(t.url,n.url)) return t;
+      if(s.token && samePage(t.url,n.url)) return t;
     } catch {}
   }
   return null;
 }
+// The page that led here. Copies of the same page saved by older versions are skipped, so
+// the arrow never "returns" to the page you are already on.
+async function sourceOf(current) {
+  let source=await node(current?.parentId);
+  for(let i=0;source&&i<10&&samePage(source.url,current.url);i++)source=await node(source.parentId);
+  return source;
+}
 async function sourceStatus(tab,s) {
-  const current=await currentNode(tab,s), source=await node(current?.parentId);
+  const current=await currentNode(tab,s), source=await sourceOf(current);
   return {currentId:current?.id||null,source,canReturn:!!source,sourceOpen:source ? !!await liveTab(source,tab.id) : false};
 }
 async function newTab(url,parentId=null,restoreId=null) {
@@ -182,8 +191,32 @@ async function treeFor(currentId,focusId) {
     }
     frontier=next.filter(k=>!segs.has(k));
   }
-  const byId=await nodes([...segs.values()].flatMap(s=>s.ids));byId.set(cur.id,cur);
-  let ancestors=[], seen=new Set(), n=cur, missingParent=false, hidden=frontier.length>0;
+  const loaded=await nodes([...segs.values()].flatMap(s=>s.ids));loaded.set(cur.id,cur);
+  // Older versions could save a page as a child of the same page (for example a Google
+  // search whose address changed). Such copies are shown as part of the page they repeat.
+  const rep=new Map();
+  const repOf=id=>{
+    if(rep.has(id))return rep.get(id);
+    const chain=[];let x=loaded.get(id),r=id;
+    while(x){
+      chain.push(x.id);r=x.id;
+      const p=x.parentId?loaded.get(x.parentId):null;
+      if(!p||chain.includes(p.id)||!samePage(p.url,x.url))break;
+      if(rep.has(p.id)){r=rep.get(p.id);break;}
+      x=p;
+    }
+    for(const c of chain)rep.set(c,r);
+    return r;
+  };
+  const byId=new Map();
+  for(const item of loaded.values()){
+    if(repOf(item.id)!==item.id)continue;
+    const parentId=item.parentId&&loaded.has(item.parentId)?repOf(item.parentId):item.parentId;
+    byId.set(item.id,parentId===item.parentId?item:{...item,parentId});
+  }
+  const shown=id=>loaded.has(id)?repOf(id):id;
+  const start=byId.get(shown(cur.id))||cur;currentId=shown(currentId);
+  let ancestors=[], seen=new Set(), n=start, missingParent=false, hidden=frontier.length>0;
   while(n && !seen.has(n.id)) {seen.add(n.id);ancestors.unshift(n);n=byId.get(n.parentId);}
   const top=ancestors[0];
   if(top.parentId && !seen.has(top.parentId)) {if(await node(top.parentId))hidden=true;else missingParent=true;}
@@ -257,29 +290,37 @@ async function handle(message,sender) {
       const docId=s.documents?.[message.navigationId] || message.navigationId;
       const known=await nodes([s.currentId,docId,fresh?.restoreId,fresh?.parentId]);
       const previous=known.get(s.currentId)||null;
-      if(s.navigationId===message.navigationId && sameURL(s.url,url) && previous)return {recorded:true};
+      if(s.navigationId===message.navigationId && samePage(s.url,url) && previous)return {recorded:true};
       let saved=known.get(docId)||null;
-      if(saved && !sameURL(saved.url,url))saved=null;
-      if(!saved && fresh?.restoreId && sameURL(fresh.url,url))saved=known.get(fresh.restoreId)||null;
-      if(!saved && message.kind==="reload" && sameURL(previous?.url,url))saved=previous;
+      if(saved && !samePage(saved.url,url))saved=null;
+      if(!saved && fresh?.restoreId && samePage(fresh.url,url))saved=known.get(fresh.restoreId)||null;
+      if(!saved && message.kind==="reload" && samePage(previous?.url,url))saved=previous;
       // A back/forward reload can lose its content-script identity. Reuse only an
       // unambiguous entry in this tab's known traversal stack; never guess globally.
       if(!saved && message.kind==="traverse" && !s.truncated) {
         const stacked=await nodes(s.stack||[]);
-        const candidates=[...new Set(s.stack||[])].map(x=>stacked.get(x)).filter(item=>item && sameURL(item.url,url));
+        const candidates=[...new Set(s.stack||[])].map(x=>stacked.get(x)).filter(item=>item && samePage(item.url,url));
         if(candidates.length===1)saved=candidates[0];
       }
+      // Still on the same address in this tab (an "#…" jump, Google changing its address, or
+      // the same address loaded again): it is the same page, not a new one.
+      if(!saved && previous && samePage(previous.url,url))saved=previous;
+      let parent=null;
       if(!saved) {
-        let parent=null;
-        if(fresh?.parentId && (sameURL(fresh.url,url) || fresh.opener))parent=known.get(fresh.parentId)||null;
+        if(fresh?.parentId && (samePage(fresh.url,url) || fresh.opener))parent=known.get(fresh.parentId)||null;
         if(!parent && previous && message.kind!=="traverse" && message.kind!=="reload") {
-          if(message.kind==="route" || sameURL(message.referrer,previous.url))parent=previous;
+          if(message.kind==="route" || samePage(message.referrer,previous.url))parent=previous;
         }
         // onCreated may not be delivered before the first content message.
         if(!parent && !s.navigationId && Number.isInteger(tab.openerTabId) && tab.openerTabId!==tabId) {
           try {const p=await safeTab(tab.openerTabId);parent=await currentNode(p,await state(p.id));}catch{}
         }
         if(parent && C.excluded(parent.url,opt.excludedHosts))parent=null;
+      }
+      // A page is never saved as a child of the same page: opening the same address again
+      // from it (for example in a new tab) is that page.
+      if(!saved && parent && samePage(parent.url,url))saved=parent;
+      if(!saved) {
         saved={id:message.navigationId,url,title:String(message.title||tab.title||url).slice(0,1000),at:Date.now(),parentId:parent?.id||null,rootId:parent?.rootId||parent?.id||message.navigationId,graphVersion:2};
         // Node and index are written together. Retry by navigationId is idempotent if session write fails.
         await addNode(saved,parent);
@@ -305,7 +346,7 @@ async function handle(message,sender) {
     case "LINK_INTENT": {
       // tabs.get can already report the destination while this click message is
       // queued. The browser-supplied sender URL and document identity anchor it.
-      if(!fromPage || opt.paused || C.excluded(s.url,opt.excludedHosts) || s.navigationId!==message.navigationId || !sameURL(sender.url,s.url))return {};
+      if(!fromPage || opt.paused || C.excluded(s.url,opt.excludedHosts) || s.navigationId!==message.navigationId || !samePage(sender.url,s.url))return {};
       const href=C.webURL(message.href), parent=await node(s.currentId);
       if(href && parent && !C.excluded(href,opt.excludedHosts))await putState(tabId,{...s,pending:{url:href,parentId:parent.id,at:Date.now()}});
       return {};
@@ -321,7 +362,7 @@ async function handle(message,sender) {
     case "RETURN":
     case "REOPEN": {
       // One request per tap: no separate status check, and the source tab is looked up once.
-      const current=await currentNode(tab,s), source=await node(current?.parentId);
+      const current=await currentNode(tab,s), source=await sourceOf(current);
       if(!source)return {none:true};
       return goNode(tab,s,source);
     }

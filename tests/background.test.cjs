@@ -349,3 +349,53 @@ test('history search over many days reads storage in batches',async()=>{
   assert.deepEqual(Array.from(found.items,v=>v.id),['v1199']);assert.equal(found.more,false);
   assert.ok(reads<=30,'expected batched reads across 120 days, got '+reads);
 });
+test('a Google search keeps one entry when Google changes its address',async()=>{
+  const h=harness();h.add(1,'https://www.google.com/search?q=prayer');await h.visit(1,'g1');
+  h.tabMap.get(1).url='https://www.google.com/search?q=prayer&sei=abc#fpstate=ive';await h.visit(1,'g2',{kind:'route'});
+  h.tabMap.get(1).url='https://www.google.com/search?q=prayer&sca_esv=9';await h.visit(1,'g3',{kind:'load',referrer:'https://www.google.com/'});
+  const t=(await h.send(1,'TREE')).data;assert.equal(t.total,1);assert.equal(t.currentId,'g1');
+  assert.equal((await h.send(1,'STATUS')).data.source,null);assert.equal((await h.send(1,'LIST')).data.total,1);
+  assert.equal((await h.send(1,'RETURN')).data.none,true);
+  h.tabMap.get(1).url='https://www.google.com/search?q=other';await h.visit(1,'g4',{kind:'route'});
+  assert.equal((await h.send(1,'STATUS')).data.source.id,'g1');
+});
+test('a jump to a section is the same page; a new path is a child',async()=>{
+  const h=harness();h.add(1,'https://wiki.example/Article');await h.visit(1,'a');
+  h.tabMap.get(1).url='https://wiki.example/Article#History';await h.visit(1,'a2',{kind:'route'});
+  let t=(await h.send(1,'TREE')).data;assert.equal(t.total,1);assert.equal(t.currentId,'a');
+  await follow(h,1,'https://wiki.example/Article/Talk','b');
+  assert.equal((await h.send(1,'STATUS')).data.source.id,'a');
+  t=(await h.send(1,'TREE')).data;assert.equal(t.total,2);assert.equal(t.currentId,'b');
+});
+test('a page is never saved as a child of the same page',async()=>{
+  const h=harness();h.add(1,'https://example.com/page');await h.visit(1,'p');
+  await follow(h,1,'https://example.com/page','p2');
+  await h.send(1,'OPEN_LINK',{href:'https://example.com/page#top'});await h.visit(10,'p3');
+  for(const tab of [1,10]){const t=(await h.send(tab,'TREE')).data;assert.equal(t.total,1);assert.equal(t.currentId,'p');}
+  assert.equal((await h.send(1,'LIST')).data.total,1);
+});
+test('returning to a closed Google search reuses it after Google changes the address',async()=>{
+  const h=harness();h.add(1,'https://www.google.com/search?q=x');await h.visit(1,'g');
+  await h.send(1,'OPEN_RESULT',{href:'https://example.com/r'});await h.visit(10,'r');
+  h.tabMap.delete(1);h.B.tabs.onRemoved.emit(1);
+  assert.equal((await h.send(10,'RETURN')).data.loaded,true);
+  h.tabMap.get(10).url='https://www.google.com/search?q=x&sei=zz';await h.visit(10,'g-again');
+  assert.equal((await h.send(10,'TREE')).data.currentId,'g');assert.equal((await h.send(10,'LIST')).data.total,2);
+});
+test('copies of the same search saved by older versions are merged in the trail and skipped by the arrow',async()=>{
+  const g='https://www.google.com/search?q=x';
+  const local={
+    'visit:g1':{id:'g1',url:g,title:'x - Google',at:1000,parentId:null,rootId:'g1',graphVersion:2},
+    'visit:r1':{id:'r1',url:'https://a.example/1',title:'A',at:1500,parentId:'g1',rootId:'g1',graphVersion:2},
+    'visit:g2':{id:'g2',url:g+'&sei=1#fpstate=ive',title:'x - Google',at:2000,parentId:'g1',rootId:'g1',graphVersion:2},
+    'visit:r2':{id:'r2',url:'https://b.example/2',title:'B',at:2500,parentId:'g2',rootId:'g1',graphVersion:2}
+  };
+  const h=harness(local);h.tabMap.set(1,{id:1,url:g+'&sei=1#fpstate=ive',title:'x - Google',incognito:false});
+  h.session['tab:1']={token:'t',url:g+'&sei=1#fpstate=ive',navigationId:'g2',currentId:'g2',documents:{g2:'g2'}};
+  const t=(await h.send(1,'TREE')).data;
+  assert.equal(t.currentId,'g1');assert.equal(t.total,3);
+  assert.deepEqual(Array.from(t.items,n=>n.id).sort(),['g1','r1','r2']);
+  assert.equal(Array.from(t.items).find(n=>n.id==='r2').parentId,'g1');
+  assert.equal((await h.send(1,'STATUS')).data.source,null);
+  assert.equal((await h.send(1,'RETURN')).data.none,true);
+});
