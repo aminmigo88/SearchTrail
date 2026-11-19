@@ -314,3 +314,14 @@ test('history paging handles clock rollback and title edits across chunks',async
   assert.equal((await h.send(1,'IMPORT',{data:backup})).ok,true);
   assert.equal((await h.send(1,'LIST',{query:'old clock'})).data.items[0].id,'older');
 });
+
+test('bookmarking a removed history row does not save the current page by mistake',async()=>{
+  const h=harness();h.add(1,'https://example.com/current');await h.visit(1,'current');
+  assert.equal((await h.send(1,'BOOKMARK_SAVE',{id:'missing'})).ok,false);assert.equal((await h.send(1,'BOOKMARKS')).data.items.length,0);
+});
+test('interrupted clear recovers after restart and preserves bookmarks',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');await h.send(1,'BOOKMARK_SAVE');
+  const remove=h.B.storage.local.remove;let once=true;h.B.storage.local.remove=async keys=>{if(once){once=false;throw Error('Interrupted');}return remove(keys);};
+  assert.equal((await h.send(1,'CLEAR')).ok,false);const h2=harness(h.local);h2.add(1,'https://example.com/a');
+  assert.equal((await h2.send(1,'LIST')).data.total,0);assert.equal((await h2.send(1,'BOOKMARKS')).data.items.length,1);
+});

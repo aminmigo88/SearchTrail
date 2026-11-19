@@ -5,7 +5,7 @@
 ## Verified locally
 
 - JavaScript syntax, manifest assets, matching package/manifest versions.
-- 43 tests execute production background logic with simulated WebExtension APIs.
+- 45 tests execute production background logic with simulated WebExtension APIs.
 - Added regressions: bounded upgrade of 1,500 visits; interrupted deletion across a background restart; repeated URLs after tab-memory truncation; partial 1,101-node trees and complete paged access; bookmark persistence and deduplication; additive backup restore; private-tab denial; chunked history/title updates.
 
 ## Browser and build checks
