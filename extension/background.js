@@ -5,9 +5,10 @@
    idx      = {v,days,count} list of day buckets and total visit count */
 "use strict";
 const B = browser, C = SearchTrailCore, L = B.storage.local;
-const DEFAULTS = {paused:false, interceptGoogle:true, excludedHosts:[], placement:"bottom-right", clearance:16};
+const DEFAULTS = {paused:false, interceptGoogle:true, excludedHosts:[], placement:"bottom-right", clearance:16, menuHidden:false};
 const SEG = 250, TREE_BUDGET = 1000, TREE_SHOW = 300, MAX_ANCESTORS = 150, TAB_MEMORY = 100, PAGE = 100;
-let work = Promise.resolve(), cachedSettings = null, indexed = false;
+// recovered: interrupted delete/clear journals were checked in this background lifetime.
+let work = Promise.resolve(), cachedSettings = null, indexed = false, recovered = false;
 const explicitTabs = new Set();
 function queue(fn) { const next=work.then(fn); work=next.catch(()=>{}); return next; }
 const stateKey = n => "tab:"+n;
@@ -50,13 +51,18 @@ async function allVisits() {
 // Rebuild derived indexes without deleting visits. The final version marker is written
 // with the complete replacement, so an interrupted migration is safe to retry.
 async function ensureIndex() {
-  const {pendingDelete,pendingClear}=await L.get(["pendingDelete","pendingClear"]);
-  if(pendingClear){
-    const values=await L.get(null);await L.remove(Object.keys(values).filter(k=>/^(visit|day|seg):/.test(k)));
-    await L.set({idx:{v:2,days:[],count:0}});await B.storage.session.clear();await L.remove("pendingClear");indexed=true;
-  }
-  if(pendingDelete) {
-    await L.set(pendingDelete.out);await L.remove(pendingDelete.gone);await L.remove("pendingDelete");
+  // Journals only need checking once per background lifetime, or again after a write in
+  // this lifetime failed part-way; this keeps an extra storage read off every action.
+  if(!recovered) {
+    const {pendingDelete,pendingClear}=await L.get(["pendingDelete","pendingClear"]);
+    if(pendingClear){
+      const values=await L.get(null);await L.remove(Object.keys(values).filter(k=>/^(visit|day|seg):/.test(k)));
+      await L.set({idx:{v:2,days:[],count:0}});await B.storage.session.clear();await L.remove("pendingClear");indexed=true;
+    }
+    if(pendingDelete) {
+      await L.set(pendingDelete.out);await L.remove(pendingDelete.gone);await L.remove("pendingDelete");
+    }
+    recovered=true;
   }
   if(indexed)return;
   if((await L.get("idx")).idx?.v===2){indexed=true;return;}
@@ -118,7 +124,8 @@ async function removeNode(n) {
   if(got[sk]){got[sk].ids=got[sk].ids.filter(x=>x!==n.id);out[sk]=got[sk];}
   // Write-ahead journal stores the absolute result. Recovery replays it, never decrements again.
   await L.set({pendingDelete:{out,gone}});
-  await L.set(out);await L.remove(gone);await L.remove("pendingDelete");
+  try {await L.set(out);await L.remove(gone);await L.remove("pendingDelete");}
+  catch(e) {recovered=false;throw e;}
 }
 async function liveTab(n,preferred) {
   const values=await B.storage.session.get(null);
@@ -191,19 +198,24 @@ async function treeFor(currentId,focusId) {
   }
   return {items:[...selected.values()],ancestors,currentId,total,missingParent,hidden,partial:hidden,rootId:cur.rootId||cur.id,earlierId:missingParent?null:ancestors[0]?.parentId||null};
 }
-// Pages through day buckets newest first; stops as soon as one page is filled.
+// Pages through day buckets newest first; stops as soon as one page is filled. Days and
+// their chunks are read in growing batches, so a first page usually takes two reads and a
+// search with few matches takes a few dozen reads instead of one read per chunk.
 async function listVisits(message) {
   const {idx}=await L.get("idx"),q=String(message.query||"").toLowerCase().slice(0,500);
   const c=Array.isArray(message.cursor)&&Number.isFinite(message.cursor[0])?[message.cursor[0],String(message.cursor[1])]:null;
   const days=(idx?.days||[]).filter(d=>!c||d<=dayOf(c[0]));
   let out=[];
   const order=(a,b)=>b[1]-a[1]||(b[0]>a[0]?1:b[0]<a[0]?-1:0);
-  for(const d of days){
-    const meta=(await L.get("day:"+d))["day:"+d];
-    for(const chunk of [...(meta?.chunks||[])].sort((a,b)=>b.max-a.max)){
-      if(out.length>PAGE&&chunk.max<out[PAGE][1])break;
-      const rows=(await L.get(chunk.key))[chunk.key]||[];
-      for(const r of rows){
+  let size=1;
+  for(let i=0,step=1;i<days.length&&out.length<=PAGE;i+=step,step=Math.min(step*2,32)){
+    const keys=days.slice(i,i+step).map(d=>"day:"+d),metas=await L.get(keys);
+    const chunks=keys.flatMap(k=>metas[k]?.chunks||[]).sort((a,b)=>b.max-a.max);
+    for(let j=0;j<chunks.length;){
+      if(out.length>PAGE&&chunks[j].max<out[PAGE][1])break;
+      const group=chunks.slice(j,j+size);j+=group.length;size=Math.min(size*2,64);
+      const got=await L.get(group.map(x=>x.key));
+      for(const chunk of group)for(const r of got[chunk.key]||[]){
         if(c&&(r[1]>c[0]||(r[1]===c[0]&&r[0]>=c[1])))continue;
         if(message.rootId&&r[4]!==message.rootId)continue;
         if(q&&!(r[2]+" "+r[3]).toLowerCase().includes(q))continue;
@@ -211,7 +223,6 @@ async function listVisits(message) {
       }
       out.sort(order);out=out.slice(0,PAGE+1);
     }
-    if(out.length>PAGE)break;
   }
   const more=out.length>PAGE;out=out.slice(0,PAGE);const last=out.at(-1);
   return {items:out.map(([id,at,title,url])=>({id,at,title,url})),total:idx?.count||0,more,cursor:last?[last[1],last[0]]:null};
@@ -325,7 +336,7 @@ async function handle(message,sender) {
       return goNode(tab,s,n,{newWindow:true});
     }
     case "DELETE": {const n=await node(String(message.id));if(n)await removeNode(n);return {};}
-    case "CLEAR": {await L.set({pendingClear:true});await ensureIndex();return {};}
+    case "CLEAR": {recovered=false;await L.set({pendingClear:true});await ensureIndex();return {};}
     case "EXPORT": return {format:"SearchTrail",version:3,exportedAt:new Date().toISOString(),visits:(await allVisits()).map(({seg,bucket,...v})=>v),bookmarks:(await L.get("bookmarks")).bookmarks||[]};
     case "BOOKMARKS": return {items:(await L.get("bookmarks")).bookmarks||[]};
     case "BOOKMARK_SAVE": {
@@ -371,7 +382,7 @@ async function handle(message,sender) {
     }
     case "SETTINGS": {
       const patch={};
-      for(const key of ["paused","interceptGoogle"])if(typeof message[key]==="boolean")patch[key]=message[key];
+      for(const key of ["paused","interceptGoogle","menuHidden"])if(typeof message[key]==="boolean")patch[key]=message[key];
       if(["bottom-right","bottom-left","top-right","top-left"].includes(message.placement))patch.placement=message.placement;
       if(Number.isFinite(message.clearance))patch.clearance=Math.max(8,Math.min(120,Math.round(message.clearance)));
       await saveSettings({...opt,...patch});return {};

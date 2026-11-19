@@ -20,7 +20,7 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   if(m.type==='STATUS')data={source:items[1],sourceOpen:true,canReturn:true,currentId:'c',settings,host:'example.test',excluded:false};
   if(m.type==='TREE')data={items,ancestors:items.slice(0,3),currentId:'c',total:4};
   if(m.type==='LIST'){const matches=items.filter(n=>!m.query||n.title.toLowerCase().includes(m.query.toLowerCase()));data={items:matches,total:4,matches:matches.length};}
-  if(m.type==='SETTINGS'){for(const k of ['placement','clearance','paused','interceptGoogle'])if(k in m)settings[k]=m[k];}
+  if(m.type==='SETTINGS'){for(const k of ['placement','clearance','paused','interceptGoogle','menuHidden'])if(k in m)settings[k]=m[k];}
   if(m.type==='BOOKMARKS')data={items:bookmarks};
   if(m.type==='BOOKMARK_SAVE'&&!bookmarks.length)bookmarks.push({...items[2],id:'bookmark'});
   if(m.type==='BOOKMARK_DELETE')bookmarks.length=0;
@@ -42,6 +42,25 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   await page.goto('https://example.test/details');await inject();
   await page.locator('.launcher:not(.menu-launcher)').tap();await eventually(()=>requests.filter(m=>m.type==='RETURN').length===1);
   assert.equal(await page.locator('.panel').count(),0,'Tap must return without opening a panel');
+  // Menu button sits directly above the arrow.
+  let menuBox=await page.locator('.menu-launcher').boundingBox(),arrowBox=await page.locator('.launcher:not(.menu-launcher)').boundingBox();
+  assert.ok(menuBox.y+menuBox.height<=arrowBox.y&&Math.abs(menuBox.x-arrowBox.x)<1,'Menu button must be stacked above the arrow');
+  // Swipe toward the screen edge tucks it into a thin tab without opening the menu.
+  await page.mouse.move(menuBox.x+25,menuBox.y+25);await page.mouse.down();
+  for(const dx of [12,24,36,44])await page.mouse.move(menuBox.x+25+dx,menuBox.y+25);
+  await page.mouse.up();
+  await eventually(()=>requests.some(m=>m.type==='SETTINGS'&&m.menuHidden===true));
+  await pause(300);menuBox=await page.locator('.menu-launcher').boundingBox();
+  assert.ok(menuBox.width<=16&&Math.abs(menuBox.x+menuBox.width-440)<=1,'Tucked menu button must be a thin tab at the screen edge');
+  assert.equal(await page.locator('.panel').count(),0,'Swiping must not open the menu');
+  await page.screenshot({path:path.join(__dirname,'../dist/ui-menu-tucked.png')});
+  // Dragging the tab back out restores it.
+  await page.mouse.move(menuBox.x+7,menuBox.y+25);await page.mouse.down();
+  for(const dx of [-12,-24,-36])await page.mouse.move(menuBox.x+7+dx,menuBox.y+25);
+  await page.mouse.up();
+  await eventually(()=>requests.some(m=>m.type==='SETTINGS'&&m.menuHidden===false));
+  await pause(300);assert.equal(Math.round((await page.locator('.menu-launcher').boundingBox()).width),50,'Menu button must be restored');
+  assert.equal(await page.locator('.panel').count(),0,'Restoring must not open the menu');
   await hold();await eventually(()=>page.locator('.tree .open').count().then(n=>n===4));
   assert.equal(requests.filter(m=>m.type==='RETURN').length,1,'Hold must not also navigate');
   assert.equal(await page.locator('.tree .current').count(),1);
@@ -91,7 +110,7 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   assert.equal(page.url(),'https://example.test/details','Managed new-tab link must leave the source page intact');
   await page.locator('#same').click();await page.waitForURL('https://example.test/next');
   assert.ok(requests.some(m=>m.type==='LINK_INTENT'&&m.href==='https://example.test/next'),'Same-tab link should record intent');
-  console.log('WebKit checks passed: direct tap, hold, branching tree, RTL isolation, history filter, saved placement, viewport resizing, generic links. Extension APIs simulated.');
+  console.log('WebKit checks passed: direct tap, stacked menu button, swipe to hide and restore, hold, branching tree, RTL isolation, history filter, saved placement, viewport resizing, generic links. Extension APIs simulated.');
  }catch(e){fs.mkdirSync(path.join(__dirname,'../dist'),{recursive:true});await page.screenshot({path:path.join(__dirname,'../dist/ui-failure.png')}).catch(()=>{});throw e;}
  finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -3,7 +3,7 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
   const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text)n.textContent=text;return n;};
   if(css){const style=el("style");style.textContent=SearchTrailCSS;root.append(style);}
   const box=el("section","st panel"+(popup?" popup-panel":""));box.dir="ltr";box.setAttribute("aria-label","SearchTrail");root.append(box);
-  const top=el("div","row top");top.append(el("h1","","SearchTrail"),el("span","version",browser.runtime.getManifest().version));
+  const top=el("div","row top");top.append(el("h1","","SearchTrail"));
   const close=el("button","close","Close");close.onclick=onClose;if(!popup)top.append(close);box.append(top);
   const error=el("p","error");error.setAttribute("role","status");box.append(error);
   const scroll=el("div","body");box.append(scroll);

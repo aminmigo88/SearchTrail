@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "SearchTrail",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Return to your source page; open the menu for browsing trails, bookmarks and local history.",
   "permissions": [
     "tabs",

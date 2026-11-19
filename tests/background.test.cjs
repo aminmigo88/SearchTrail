@@ -325,3 +325,27 @@ test('interrupted clear recovers after restart and preserves bookmarks',async()=
   assert.equal((await h.send(1,'CLEAR')).ok,false);const h2=harness(h.local);h2.add(1,'https://example.com/a');
   assert.equal((await h2.send(1,'LIST')).data.total,0);assert.equal((await h2.send(1,'BOOKMARKS')).data.items.length,1);
 });
+test('menu button hidden state is validated and saved',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');
+  assert.equal((await h.send(1,'STATUS',{lite:true})).data.settings.menuHidden,false);
+  await h.send(1,'SETTINGS',{menuHidden:true});await h.send(1,'SETTINGS',{menuHidden:'yes'});
+  const r=harness(h.local);r.add(1,'https://example.com/a');
+  assert.equal((await r.send(1,'STATUS',{lite:true})).data.settings.menuHidden,true);
+});
+test('a delete that fails part-way is completed by the next action in the same session',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');
+  h.tabMap.get(1).url='https://example.com/b';await h.visit(1,'b',{kind:'load',referrer:''});
+  const remove=h.B.storage.local.remove;let fail=true;h.B.storage.local.remove=async keys=>{if(fail){fail=false;throw Error('Interrupted');}return remove(keys);};
+  assert.equal((await h.send(1,'DELETE',{id:'a'})).ok,false);
+  const list=(await h.send(1,'LIST')).data;assert.equal(list.total,1);assert.deepEqual(Array.from(list.items,v=>v.id),['b']);
+  assert.equal(h.local.pendingDelete,undefined);assert.equal(h.local['visit:a'],undefined);
+});
+test('history search over many days reads storage in batches',async()=>{
+  const now=Date.now(),local={};
+  for(let i=0;i<1200;i++)local['visit:v'+i]={id:'v'+i,url:'https://example.com/'+i,title:'Page '+i,at:now-i*864e5/10,parentId:null,rootId:'v'+i,graphVersion:2};
+  const h=harness(local);h.add(1,'https://example.com/x');await h.send(1,'STATUS',{lite:true});
+  const get=h.B.storage.local.get;let reads=0;h.B.storage.local.get=async keys=>{reads++;return get(keys);};
+  const found=(await h.send(1,'LIST',{query:'page 1199'})).data;
+  assert.deepEqual(Array.from(found.items,v=>v.id),['v1199']);assert.equal(found.more,false);
+  assert.ok(reads<=30,'expected batched reads across 120 days, got '+reads);
+});
