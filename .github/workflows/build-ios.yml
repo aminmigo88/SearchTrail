@@ -24,6 +24,19 @@ jobs:
         run: |
           npm run check
           npm test
+      - name: Verify WebKit interface and gestures
+        run: |
+          npm install --ignore-scripts --no-package-lock
+          npx playwright install webkit
+          npm run test:ui
+      - name: Save interface test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearchTrail-interface-checks
+          path: dist/ui-*.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build unsigned iPhone package
         run: bash scripts/build-ios.sh
       - name: Save iPhone package

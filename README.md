@@ -1,93 +1,78 @@
-# SearchTrail 0.1.0 — iPhone Safari prototype
+# SearchTrail 0.2.0 — Safari browsing trails
 
-Return to the Google search that opened a result, and keep a separate local record of visited pages across tabs.
+Tap the floating arrow to return directly to the page that led here. Hold it for a branching trail, saved history and settings. Sources can be any permitted HTTP/HTTPS website.
 
-**An unsigned iPhone IPA has been built successfully.** Download the artifact from [the verified build](https://github.com/aminmigo88/SearchTrail/actions/runs/44514847061), extract the IPA, and sign it before installation. The repository contains the source and build workflow. Automated logic tests and Xcode compilation pass; signing, Safari behavior and the iPhone interface still need device validation. There is no certificate, provisioning profile or password in this project.
+## Changes from 0.1
 
-## What the first version does
+- **Tap:** return to the immediate source without opening the panel. An existing source tab is activated directly. If that page is no longer open, its saved URL loads in the current tab. Result tabs are not closed automatically.
+- **Hold for half a second:** open the trail tree. The current path is highlighted; sibling branches remain visible. Tap any saved node to revisit it. To jump farther back than the immediate source, select an ancestor in the tree.
+- **Any website:** ordinary same-tab links retain normal website behavior. SearchTrail observes their source. Normal `_blank` links are opened with explicit source tracking. Google result links still open in a new tab by default; this is optional in Settings.
+- **Bottom sheet:** the smaller panel and its Trail / History / Settings controls sit near the button. Default button location is bottom-right, with 16 px clearance inside the webpage viewport.
+- **Saved placement:** hold the button → Settings → choose one of four corners and an edge distance. Dragging the button also saves the nearest corner and distance. Settings apply across websites. These settings are in the Safari extension panel/popup, not the native container app.
+- **Arabic and other RTL pages:** the controls keep their own layout direction; page titles can display in their own writing direction. URLs are displayed readably without exposing a long encoded query in each row.
+- Existing 0.1 visit records remain available in History. Their missing navigation relationships are not reconstructed.
 
-- Adds a draggable blue button on permitted HTTP/HTTPS webpages. Tap it to open Recent visits or Return to search without opening a new tab.
-- By default, intercepts normal taps on external links on Google search-result pages and opens a new tab. This allows SearchTrail to record the exact source search instead of guessing from the most recently used tab.
-- The return action activates the existing source tab and leaves result tabs open. If the source has closed or navigated to another search, it offers **Reopen saved search** instead. It never silently navigates an unrelated tab.
-- Records titles, full URLs, and timestamps of loaded pages. Visits remain after Back navigation and closed tabs. Repeated visits can appear separately.
-- Searches the recorded titles/URLs; lets you pause, exclude a site, delete visits or export JSON.
-- Stores records locally in extension storage. No analytics, server, subscription or network backend. Private tabs are rejected even if the extension is enabled there. URLs can contain personal search terms; exported JSON includes those URLs.
-- Does not access, clear, repair or replace Safari's own History or bookmarks. It cannot change Safari's native toolbar or Back gesture.
+## Install or update
 
-## Build the IPA on a cloud Mac
+1. Download the unsigned IPA from a successful [GitHub Actions build](https://github.com/aminmigo88/SearchTrail/actions). Extract the artifact ZIP if downloading from GitHub.
+2. Import the IPA into Feather. Sign with your working certificate/profile and **retain embedded app extensions**. Both the host and `.appex` need suitable signing/provisioning.
+3. To preserve data, install over the old version using the same signing identity and bundle identifiers; do not uninstall first. Signer behavior can affect data retention. Export valuable history before upgrading. JSON import is not implemented yet.
+4. Open SearchTrail once; enable it and website access in **Settings → Apps → Safari → Extensions**. Keep Private Browsing access off.
+5. Reload existing Safari webpages so they use the new content script. Test with fresh links; older pages cannot supply missing parent relationships retroactively.
 
-Use a GitHub repository you control. No signing secret is required for this build.
+No certificate, provisioning profile or private key belongs in this repository. Builds are unsigned.
 
-1. Extract this ZIP on your Windows laptop. The repository root must contain `extension/`, `scripts/`, `tests/`, `package.json`, and `.github/workflows/build-ios.yml` directly. Do not upload the ZIP as a single file or put everything inside an extra `searchtrail` folder. Include the hidden `.github` directory.
-2. Commit these files to your repository. A private repository keeps the source private; check your available Actions allowance before running a macOS build. Do not add a certificate or provisioning profile.
-3. Changes to source/build files on `main` start a build automatically. You can also open **Actions → Build SearchTrail for iPhone → Run workflow**.
-4. After a successful run, download **SearchTrail-unsigned-IPA** from that run's Artifacts section. Extract the artifact ZIP to obtain `SearchTrail-unsigned.ipa`.
-5. If the workflow fails, retain its build log. It is deliberately configured to stop rather than upload an app with a missing Safari extension.
+## Device acceptance checks
 
-The workflow uses Apple's installed Safari packager/converter, generates the Xcode host app and extension project, compiles for real iPhones without signing, checks that the `.appex` and extension resources were embedded, and packages `Payload/SearchTrail.app` into the IPA. The generated Xcode project is build output, not an existing project included here.
+- From any ordinary website, open a link in the same tab. Tap the arrow: it should load the source in this tab. If the source still exists in another tracked tab, that tab should activate instead.
+- On Google, open several results. A tap on each should return directly to its search. Open a second search and verify each result returns to the correct source.
+- Navigate A → B → C, return to A, then open D. Hold the arrow: the tree should contain A → B → C and A → D, with your current branch highlighted. Native Back/Forward should restore known nodes where identifiable.
+- Open a new-tab link from a non-Google page and follow another link within the result. The immediate source should now be that result page; the original source should remain an ancestor in the tree.
+- Close a source tab, or navigate it to an unrelated page. Returning should load the saved source in the current result tab and leave the unrelated tab untouched.
+- Hold → Settings → Bottom left. Reload and visit another website: placement should remain. Check all corners, dragging, screen rotation and keyboard visibility.
+- Verify private pages are absent; pause and exclude a site, then verify new pages there are not recorded. Test history search, deletion and JSON export.
 
-On a Mac with Xcode you can instead run `bash scripts/build-ios.sh` from this directory. Windows cannot run that script's Xcode build locally.
+## What is recorded
 
-## Sign and install with Feather
+Page nodes contain a title, full URL, timestamp and (when established) a parent node ID. The graph and history are stored locally in extension storage. Tab identities and document mappings are temporary session data. No backend, analytics or remote scripts.
 
-Your screenshot shows imported Distribution and Development entries and remaining time. It does not prove that the certificate is unrevoked or that the provisioning profile permits this app and extension.
+Relationships come from observed link taps, validated same-tab referrers, known document restoration and Safari's opener metadata. A navigation with no reliable parent starts a new tree. Reloads/restores reuse a known node instead of adding a loop. Separate newly loaded visits to the same URL can still be distinct nodes. Version 0.2 is a graph of observed pages, not a timestamped log of every back-button action.
 
-1. Transfer the unsigned IPA to your iPhone and import it into Feather.
-2. Use a certificate/profile that already installs apps successfully on this iPhone. The Distribution entry is a reasonable first candidate for a regular signed release **if its associated profile is suitable**; the label alone cannot prove that.
-3. Preserve the embedded app extension (`PlugIns/*.appex`). If your signer offers a remove-extensions option, leave it disabled. Both the container app and Safari extension must be signed correctly, with provisioning and identifiers that match. Merely signing the outer app is insufficient.
-4. Sign and install. Keep the bundle identifiers consistent across updates so the local log is not unintentionally replaced by a different installation.
-5. Open SearchTrail once, then enable it under **Settings → Apps → Safari → Extensions → SearchTrail**. Grant access to the websites you want to record; all-sites access is necessary for a broad browsing log. Keep Private Browsing access disabled.
-6. Reload existing webpages. Open a Google search and use the blue button.
+Private tabs cannot record, read normal history or change settings. Pausing/excluding prevents recording and clears the current source relationship for that page. Deleting history affects SearchTrail only, not Safari History.
 
-If the app installs but SearchTrail does not appear in Safari Extensions, do not assume the JavaScript is at fault: check that the signer retained and signed the `.appex`. If signing fails, share only the error message, not your certificate password or private key. Some profiles may not be suitable; this project cannot make them suitable.
+## Limits
 
-## Device acceptance test — required before relying on it
+- SearchTrail cannot alter Safari's native Back button, swipe gesture, toolbar or tab-switch animation. It uses its own floating button.
+- Returning to a source that is no longer open loads its saved address; this may reload the page and does not restore form state or scroll position. It does not replay POST requests.
+- Sources are supported on any **permitted** HTTP/HTTPS site, but perfect capture is not guaranteed. Browser-internal pages, Private Browsing, in-app browsers, restricted documents and pages without permission are outside its view.
+- Native context-menu/modifier new tabs depend on Safari supplying opener information. Site-script popups, rapidly followed redirects, canceled link clicks, and rapid SPA changes may produce incomplete paths. Ambiguous back/forward restorations are left unlinked rather than guessed.
+- Website same-tab behavior is preserved; links explicitly requesting a new tab are managed to retain their source. Site-specific handlers on such links may behave differently. Google interception can be disabled in Settings.
+- Visible-page route changes are checked every 750 ms. Same-URL history-state changes are not distinguished. The extension does not modify website `history.state` or intercept POST form submissions.
+- Old visit records lack parent IDs. Updating cannot reconstruct their trees. Session source matching resets after a browser restart; persisted graphs remain and their saved URLs can be reopened.
+- Tree view displays at most 300 nodes including the current ancestry. History shows up to 20,000 matches in batches. Large-history performance is not yet measured. No automatic deletion; export backups. Removing extension data/uninstalling can remove it.
+- UI checks use desktop WebKit with a mobile viewport and simulated extension APIs. Safari/iPhone signing, real touch behavior, viewport/keyboard handling and extension transport require device testing.
 
-1. Search Google for `air purifier`. Open three different external results. On each, Return to search must activate the same original results tab, without creating another Google tab or closing the results.
-2. Open a separate Google search for `3D printer`. Open results from both searches alternately. Each return button must go to its own search.
-3. In a result, follow several links. Return to search should remain tied to its original search. A new tab opened through Safari's context menu can only inherit this connection if Safari supplies its opener information.
-4. Close the original Google tab. The button must become Reopen saved search. Then change an original Google tab to a different query and verify the same fallback. Try two identical searches in different tabs too.
-5. Visit 20 ordinary pages across multiple tabs; go Back, open other links and close tabs. SearchTrail should retain the records of pages on which it ran. Compare titles and URLs, not just the displayed number.
-6. Quit/reopen Safari and revisit a permitted page. Recent visits should remain. Source-tab connections may be reset across a browser restart; a saved search URL can still be reopened from a recorded visit.
-7. Verify a private page does not appear. Pause recording, load a fresh page, and verify it is not saved. Exclude a site and repeat. An exclusion covers its subdomains; remove it on the same hostname where it was added.
-8. Export JSON and confirm the iPhone can save/open the file. Test deleting one visit without affecting other records. Test Delete visit log only after exporting any records you want to retain.
-9. Move the floating button, open the panel with the keyboard visible, rotate the phone and test a long list. The floating button's position is currently per page, not synchronized across websites.
-
-## Honest limits of this prototype
-
-- It cannot recover visits from before installation or pages that Safari never allowed the extension to see. Browser-internal pages, most built-in PDF views, in-app browsers and private tabs are not captured.
-- Fast redirects that never reach a loaded document may not be recorded. The extension polls visible-page URL changes every second to notice single-page-app navigation; very rapid changes between polls may be missed. It is a page-visit log, not a complete network-request recorder or a full-text archive.
-- Normal taps on Google external links are controlled by default. Long-press/context-menu and other site-created tabs depend on Safari providing opener information. It intentionally does not guess when that information is missing.
-- A suspended search tab may reload when Safari activates it; preserving its scroll position is controlled by Safari and the website.
-- There is no automatic deletion policy in this prototype. Safari/iOS quotas and storage failures still apply; failures are surfaced and visit writes are retried while the page remains available. Uninstalling/removing extension data can remove the log. Export backups.
-- History search currently reads the stored log and displays up to 20,000 matching records in batches. It is designed first for tens/hundreds of pages; performance with a large long-term history has not been measured. Export includes all saved records.
-- Restoring a JSON backup and importing existing Safari bookmarks are not implemented in v0.1.0.
-- Real iOS compilation passed on GitHub's macOS runner. Feather signing, navigation and UI tests have **not** been run on an iPhone.
-
-## Local verification
-
-Node.js 20 or newer; no npm dependencies:
+## Build and verify
 
 ```sh
 npm run check
 npm test
+# Optional WebKit interface checks (requires dependencies/browser binaries):
+npm install
+npx playwright install webkit
+npm run test:ui
+# macOS with Xcode:
+bash scripts/build-ios.sh
 ```
 
-Automated tests exercise real background code with simulated browser APIs. They test search/source isolation, wrong-tab prevention, tab-ID reuse, parallel visit writes, private-tab denial, persistence across background recreation, pause/exclusions, input validation and retry idempotency. They do not establish Safari compatibility.
+The workflow runs logic and WebKit interface checks, compiles for real iPhones and validates the embedded Safari extension before publishing an unsigned IPA. It runs on source/build changes on `main` and supports manual dispatch. Standard GitHub macOS Actions allowance applies.
 
-## Files
-
-- `extension/`: the HTML/CSS/JavaScript Safari Web Extension.
-- `scripts/build-ios.sh`: generates and compiles the iOS container using Apple's tool.
-- `scripts/package-ipa.py`: checks the embedded Safari extension before packaging.
-- `.github/workflows/build-ios.yml`: automatic/manual cloud-Mac build; no signing secrets.
-- `tests/`: automated behavior tests.
+The stable bundle IDs are `app.searchtrail.SearchTrail` and `app.searchtrail.SearchTrail.Extension` before re-signing.
 
 ## References
 
-- [Apple: Packaging a web extension for Safari](https://developer.apple.com/documentation/safariservices/packaging-a-web-extension-for-safari)
-- [Apple: Running your Safari web extension](https://developer.apple.com/documentation/safariservices/running-your-safari-web-extension)
-- [Apple: Browser-based packaging](https://developer.apple.com/documentation/safariservices/packaging-and-distributing-safari-web-extensions-with-app-store-connect)
-- [Mozilla: tabs API](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs)
+- [Apple: Safari extension compatibility](https://developer.apple.com/documentation/safariservices/assessing-your-safari-web-extension-s-browser-compatibility)
+- [Apple: Packaging a web extension](https://developer.apple.com/documentation/safariservices/packaging-a-web-extension-for-safari)
+- [Apple: Running a Safari web extension](https://developer.apple.com/documentation/safariservices/running-your-safari-web-extension)
 
-Prepared 19 November 2026. Prototype 0.1.0.
+Prepared 19 November 2026.

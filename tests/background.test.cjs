@@ -21,7 +21,7 @@ function harness(sharedLocal){
   for(const file of ['core.js','background.js'])vm.runInContext(fs.readFileSync(require.resolve('../extension/'+file),'utf8'),ctx);
   function add(id,url,extra={}){const t={id,url,title:url,incognito:false,...extra};tabMap.set(id,t);return t;}
   async function send(id,type,data={}){return onMessage.listeners[0]({type,...data},{tab:{...tabMap.get(id)},frameId:0,url:tabMap.get(id)?.url});}
-  async function visit(id,navigationId=webcrypto.randomUUID()){return send(id,'VISIT',{url:tabMap.get(id).url,title:tabMap.get(id).title,navigationId});}
+  async function visit(id,navigationId=webcrypto.randomUUID(),extra={}){return send(id,'VISIT',{url:tabMap.get(id).url,title:tabMap.get(id).title,navigationId,...extra});}
   return {add,send,visit,tabMap,local,session,B};
 }
 test('two concurrent Google searches keep their own destinations',async()=>{
@@ -29,19 +29,21 @@ test('two concurrent Google searches keep their own destinations',async()=>{
   await Promise.all([h.visit(1),h.visit(2)]);
   const results=await Promise.all([h.send(1,'OPEN_RESULT',{href:'https://example.com/air'}),h.send(2,'OPEN_RESULT',{href:'https://example.com/printer'})]);
   assert.ok(results.every(x=>x.ok));await h.visit(10);await h.visit(11);
-  assert.equal((await h.send(10,'STATUS')).data.source.tabId,1);
-  assert.equal((await h.send(11,'STATUS')).data.source.tabId,2);
+  assert.equal((await h.send(10,'STATUS')).data.source.url,'https://www.google.com/search?q=air');
+  assert.equal((await h.send(11,'STATUS')).data.source.url,'https://www.google.com/search?q=printer');
   assert.equal((await h.send(10,'RETURN')).ok,true);assert.equal(h.tabMap.get(1).active,true);
   assert.equal((await h.send(11,'RETURN')).ok,true);assert.equal(h.tabMap.get(2).active,true);
 });
-test('closed or repurposed source is never activated; reopen is explicit',async()=>{
-  const h=harness();h.add(1,'https://www.google.com/search?q=air');await h.visit(1);await h.send(1,'OPEN_RESULT',{href:'https://example.com/a'});await h.visit(10);
-  h.tabMap.get(1).url='https://www.google.com/search?q=printer';await h.visit(1);
-  assert.equal((await h.send(10,'STATUS')).data.canReturn,false);
-  assert.equal((await h.send(10,'RETURN')).ok,false);
-  h.tabMap.delete(1);assert.equal((await h.send(10,'RETURN')).ok,false);
-  assert.equal((await h.send(10,'REOPEN')).ok,true);assert.equal(h.tabMap.get(11).url,'https://www.google.com/search?q=air');
-  assert.equal((await h.send(10,'STATUS')).data.canReturn,true);
+test('changed source is not activated; return loads saved source in the current tab',async()=>{
+  const h=harness();h.add(1,'https://www.google.com/search?q=air');await h.visit(1,'root');await h.send(1,'OPEN_RESULT',{href:'https://example.com/a'});await h.visit(10,'result');
+  h.tabMap.get(1).url='https://www.google.com/search?q=printer';await h.visit(1,'other');
+  assert.equal((await h.send(10,'STATUS')).data.sourceOpen,false);
+  assert.equal((await h.send(10,'RETURN')).ok,true);
+  assert.equal(h.tabMap.get(1).url,'https://www.google.com/search?q=printer');
+  assert.equal(h.tabMap.get(10).url,'https://www.google.com/search?q=air');
+  await h.visit(10,'restored-root');
+  assert.equal((await h.send(10,'TREE')).data.currentId,'root');
+  assert.equal((await h.send(10,'LIST')).data.total,3);
 });
 test('visit log survives branching, repeated URLs, background recreation and tab closing',async()=>{
   const h=harness();h.add(1,'https://www.google.com/search?q=air');await h.visit(1);
@@ -73,7 +75,7 @@ test('reused tab identifiers after restart cannot target an unrelated tab',async
   const h=harness();h.add(1,'https://www.google.com/search?q=air');await h.visit(1);await h.send(1,'OPEN_RESULT',{href:'https://example.com/a'});await h.visit(10);
   const item=(await h.send(10,'LIST')).data.items.find(x=>x.url==='https://example.com/a');
   const restarted=harness(h.local);restarted.add(1,'https://www.google.com/search?q=air');restarted.add(2,'https://example.com/other');await restarted.visit(1);
-  await restarted.send(2,'OPEN_VISIT',{id:item.id});assert.equal((await restarted.send(10,'STATUS')).data.canReturn,false);
+  await restarted.send(2,'OPEN_VISIT',{id:item.id});await restarted.visit(10,'reopened');assert.equal((await restarted.send(10,'STATUS')).data.sourceOpen,false);assert.equal((await restarted.send(10,'RETURN')).ok,true);assert.equal(restarted.tabMap.get(1).active,undefined);
 });
 test('untrusted URL messages and non-web protocols do not create visits or tabs',async()=>{
   const h=harness();h.add(1,'https://example.com/real');await h.send(1,'VISIT',{url:'https://example.com/fake',navigationId:'fake'});
@@ -91,8 +93,105 @@ test('a retry after session-state failure does not append a duplicate visit',asy
   assert.equal((await h.visit(1,'retry-document')).ok,true);
   assert.equal((await h.send(1,'LIST')).data.total,1);
 });
-test('a child tab inherits the search through a result tab when opener information exists',async()=>{
+test('a child tab links to its immediate opener with the original search in its ancestry',async()=>{
   const h=harness();h.add(1,'https://www.google.com/search?q=air');await h.visit(1);await h.send(1,'OPEN_RESULT',{href:'https://example.com/a'});await h.visit(10);
   h.add(20,'https://example.com/details',{openerTabId:10});h.B.tabs.onCreated.emit(h.tabMap.get(20));await h.visit(20);
-  assert.equal((await h.send(20,'STATUS')).data.source.tabId,1);
+  assert.equal((await h.send(20,'STATUS')).data.source.url,'https://example.com/a');const t=(await h.send(20,'TREE')).data;assert.equal(t.ancestors[0].url,'https://www.google.com/search?q=air');assert.equal(t.ancestors.length,3);
+});
+async function follow(h,tabId,url,navId){
+  const source=h.tabMap.get(tabId).url;
+  const s=h.session['tab:'+tabId];
+  await h.send(tabId,'LINK_INTENT',{href:url,navigationId:s.navigationId});
+  h.tabMap.get(tabId).url=url;
+  const result=await h.visit(tabId,navId,{referrer:source,kind:'load'});assert.equal(result.ok,true,result.error);
+}
+test('any website supports same-tab source returns and branching without cycles',async()=>{
+  const h=harness();h.add(1,'https://news.example/list');await h.visit(1,'a');
+  await follow(h,1,'https://news.example/article','b');
+  await follow(h,1,'https://other.example/details','c');
+  assert.equal((await h.send(1,'STATUS')).data.source.id,'b');
+  h.tabMap.get(1).url='https://news.example/list';await h.visit(1,'a',{kind:'traverse'});
+  await follow(h,1,'https://news.example/second','d');
+  const t=(await h.send(1,'TREE')).data;
+  assert.deepEqual(Array.from(t.ancestors,n=>n.id),['a','d']);
+  assert.equal(t.items.find(n=>n.id==='c').parentId,'b');
+  assert.equal(t.items.find(n=>n.id==='b').parentId,'a');
+  assert.equal(t.items.length,4);
+  await h.send(1,'RETURN');assert.equal(h.tabMap.get(1).url,'https://news.example/list');
+  await h.visit(1,'new-load');assert.equal((await h.send(1,'TREE')).data.currentId,'a');
+});
+test('non-Google new-tab links preserve the exact source, including concurrent identical URLs',async()=>{
+  const h=harness();h.add(1,'https://forum.example/thread');h.add(2,'https://forum.example/thread');
+  await h.visit(1,'source1');await h.visit(2,'source2');
+  await h.send(1,'OPEN_LINK',{href:'https://docs.example/a'});await h.send(2,'OPEN_LINK',{href:'https://docs.example/b'});
+  await h.visit(10,'a');await h.visit(11,'b');
+  assert.equal((await h.send(10,'STATUS')).data.source.id,'source1');
+  assert.equal((await h.send(11,'STATUS')).data.source.id,'source2');
+  await h.send(10,'RETURN');assert.equal(h.tabMap.get(1).active,true);assert.equal(h.tabMap.get(2).active,undefined);
+});
+test('closed generic source is loaded without creating another tab',async()=>{
+  const h=harness();h.add(1,'https://forum.example/thread');await h.visit(1,'root');
+  await h.send(1,'OPEN_LINK',{href:'https://docs.example/a'});await h.visit(10,'a');
+  h.tabMap.delete(1);h.B.tabs.onRemoved.emit(1);
+  const result=await h.send(10,'RETURN');assert.equal(result.ok,true);assert.equal(h.tabMap.size,1);
+  assert.equal(h.tabMap.get(10).url,'https://forum.example/thread');
+});
+test('address-bar navigation without evidence starts a separate root',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');
+  h.tabMap.get(1).url='https://unrelated.example/b';await h.visit(1,'b',{kind:'load',referrer:''});
+  assert.equal((await h.send(1,'STATUS')).data.source,null);assert.equal((await h.send(1,'TREE')).data.total,1);
+});
+test('new document back traversal reuses an unambiguous saved entry',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');await follow(h,1,'https://example.com/b','b');
+  h.tabMap.get(1).url='https://example.com/a';await h.visit(1,'new-doc',{kind:'traverse'});
+  assert.equal((await h.send(1,'TREE')).data.currentId,'a');assert.equal((await h.send(1,'LIST')).data.total,2);
+});
+test('ambiguous traversal with repeated URLs does not invent ancestry',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');
+  await follow(h,1,'https://example.com/b','b');await follow(h,1,'https://example.com/a','a2');await follow(h,1,'https://example.com/c','c');
+  h.tabMap.get(1).url='https://example.com/a';await h.visit(1,'unknown',{kind:'traverse'});
+  assert.equal((await h.send(1,'STATUS')).data.source,null);
+});
+test('SPA route and restored document maintain their path',async()=>{
+  const h=harness();h.add(1,'https://spa.example/a');await h.visit(1,'a');
+  h.tabMap.get(1).url='https://spa.example/b';await h.visit(1,'b',{kind:'route'});
+  h.tabMap.get(1).url='https://spa.example/c';await h.visit(1,'c',{kind:'route'});
+  h.tabMap.get(1).url='https://spa.example/b';await h.visit(1,'b',{kind:'traverse'});
+  assert.equal((await h.send(1,'STATUS')).data.source.id,'a');
+  assert.equal((await h.send(1,'TREE')).data.total,3);
+});
+test('deleted parents are indicated; clear removes all paths and live mappings',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');await follow(h,1,'https://example.com/b','b');
+  await h.send(1,'DELETE',{id:'a'});assert.equal((await h.send(1,'TREE')).data.missingParent,true);
+  assert.equal((await h.send(1,'RETURN')).ok,false);
+  await h.send(1,'CLEAR');assert.equal((await h.send(1,'LIST')).data.total,0);assert.equal((await h.send(1,'TREE')).data.items.length,0);
+});
+test('private tabs cannot read paths or change settings',async()=>{
+  const h=harness();h.add(1,'https://private.example',{incognito:true});
+  for(const type of ['TREE','GO_NODE','SETTINGS','EXPORT'])assert.equal((await h.send(1,type,{id:'a',placement:'top-left'})).ok,false);
+  assert.equal(h.local.settings,undefined);
+});
+test('placement is validated and preserved across background recreation',async()=>{
+  const h=harness();h.add(1,'https://example.com');await h.send(1,'SETTINGS',{placement:'bottom-left',clearance:24});
+  await h.send(1,'SETTINGS',{placement:'invalid',clearance:9999});
+  const r=harness(h.local);r.add(1,'https://example.com');const s=(await r.send(1,'STATUS')).data.settings;
+  assert.equal(s.placement,'bottom-left');assert.equal(s.clearance,120);assert.equal(s.paused,false);
+});
+test('version 0.1 history remains readable without fabricated tree links',async()=>{
+  const h=harness({'visit:legacy':{id:'legacy',url:'https://example.com/old',title:'Old page',at:1,source:{url:'https://google.com/search?q=x'}}});h.add(1,'https://example.com/new');await h.visit(1,'new');
+  assert.equal((await h.send(1,'LIST')).data.total,2);assert.equal((await h.send(1,'TREE')).data.total,1);
+  await h.send(1,'OPEN_VISIT',{id:'legacy'});await h.visit(10,'old-reopened');assert.equal((await h.send(10,'STATUS')).data.source,null);
+});
+test('excluded or paused pages do not link future pages to a stale source',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');await h.send(1,'SETTINGS',{paused:true});
+  h.tabMap.get(1).url='https://example.com/private';await h.visit(1,'private');await h.send(1,'SETTINGS',{paused:false});
+  h.tabMap.get(1).url='https://example.com/b';await h.visit(1,'b',{referrer:'https://example.com/private'});
+  assert.equal((await h.send(1,'STATUS')).data.source,null);assert.equal((await h.send(1,'LIST')).data.total,2);
+});
+test('same-tab click captured during navigation still links to its sending document',async()=>{
+  const h=harness();h.add(1,'https://example.com/source');await h.visit(1,'source');
+  h.tabMap.get(1).url='https://other.example/destination';
+  const r=await h.B.runtime.onMessage.listeners[0]({type:'LINK_INTENT',href:'https://other.example/destination',navigationId:'source'},{tab:{id:1},frameId:0,url:'https://example.com/source'});
+  assert.equal(r.ok,true);await h.visit(1,'dest',{referrer:'https://example.com/'});
+  assert.equal((await h.send(1,'STATUS')).data.source.id,'source');
 });

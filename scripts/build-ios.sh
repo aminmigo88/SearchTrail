@@ -24,7 +24,7 @@ xcodebuild -project "$task_project" -scheme "$task_scheme" \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath "$task_build/DerivedData" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
-  IPHONEOS_DEPLOYMENT_TARGET=16.4 build
+  IPHONEOS_DEPLOYMENT_TARGET=16.4 MARKETING_VERSION=0.2.0 CURRENT_PROJECT_VERSION=2 build
 task_app="$(find "$task_build/DerivedData/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -type d -print -quit)"
 if [[ -z "$task_app" ]]; then echo 'No iPhone app was produced.' >&2; exit 1; fi
 python3 "$task_root/scripts/package-ipa.py" "$task_app" "$task_root/dist/SearchTrail-unsigned.ipa"
