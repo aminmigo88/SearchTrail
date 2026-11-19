@@ -11,6 +11,18 @@
     if(!response?.ok)throw Error(response?.error||"SearchTrail could not reach its background process.");
     return response.data;
   }
+  // A hold that lasts past 250 ms is not a tap: start loading the panel data then,
+  // so it is ready when the panel opens at 500 ms. Taps never wait behind it.
+  let warm=null;
+  function prefetch(){
+    warm={at:Date.now(),STATUS:call({type:"STATUS"}),TREE:call({type:"TREE"})};
+    warm.STATUS.catch(()=>{});warm.TREE.catch(()=>{});
+  }
+  function uiCall(message){
+    const keys=Object.keys(message);
+    if(warm && Date.now()-warm.at<3000 && keys.length===1 && warm[message.type]){const p=warm[message.type];delete warm[message.type];return p;}
+    return call(message);
+  }
   function reportError(e) {failed=e.message;if(button){button.classList.add("bad");button.title=failed;}ui?.error(failed);}
   function viewport() {const v=window.visualViewport;return {x:v?.offsetLeft||0,y:v?.offsetTop||0,width:v?.width||innerWidth,height:v?.height||innerHeight};}
   function position() {
@@ -21,18 +33,18 @@
     host.style.setProperty("left",x+"px","important");host.style.setProperty("top",y+"px","important");
     const gap=10,available=top?v.y+v.height-(y+50+gap)-8:y-v.y-gap-8;
     const panelHeight=Math.max(100,Math.min(480,v.height*.56,available));
-    panelRoot.style.cssText=`position:fixed;left:${v.x+Math.max(8,(v.width-Math.min(400,v.width-16))/2)}px;top:${top?y+50+gap:y-gap}px;transform:${top?"none":"translateY(-100%)"};--sheet-width:${Math.min(400,v.width-16)}px;--sheet-height:${panelHeight}px;direction:ltr;`;
+    panelRoot.style.cssText=`position:fixed;left:${v.x+Math.max(8,(v.width-Math.min(400,v.width-16))/2)}px;top:${top?y+50+gap:y-gap}px;transform:${top?"none":"translateY(-100%)"};--sheet-width:${Math.min(400,v.width-16)}px;--sheet-height:${panelHeight}px;--sheet-origin:${top?"top":"bottom"} center;direction:ltr;`;
   }
   function toggle(value,view="trail") {
     open=value;panelRoot.hidden=!open;button.setAttribute("aria-expanded",String(open));
-    if(open){if(!ui)ui=SearchTrailUI(panelRoot,call,{onClose:()=>toggle(false)});ui.show(view);if(failed)ui.error(failed);}
+    if(open){if(!ui)ui=SearchTrailUI(panelRoot,uiCall,{onClose:()=>toggle(false),css:false});ui.show(view);if(failed)ui.error(failed);}
     position();
   }
   async function tap() {
     if(open){toggle(false);return;}
     try {
-      const status=await call({type:"STATUS"});options=status;
-      if(status.source)await call({type:"RETURN"});else toggle(true);
+      const result=await call({type:"RETURN"});
+      if(result?.none)toggle(true);
     }catch(e){reportError(e);toggle(true);}
   }
   function mount() {
@@ -43,23 +55,25 @@
     panelRoot=document.createElement("div");panelRoot.hidden=true;shadow.append(panelRoot);
     button=document.createElement("button");button.className="launcher";button.textContent="↩";button.title="Tap: source page · Hold: trail and settings";
     button.setAttribute("aria-label","Return to source page. Hold for browsing trail and settings.");button.setAttribute("aria-expanded","false");shadow.append(button);
-    let start,timer,held=false,suppressUntil=0;
-    function cancel(){clearTimeout(timer);start=null;dragging=false;}
+    let start,timer,warmTimer,held=false,suppressUntil=0;
+    const press=on=>button.classList.toggle("pressed",on);
+    function cancel(){clearTimeout(timer);clearTimeout(warmTimer);start=null;dragging=false;press(false);}
     button.onpointerdown=e=>{
       if(e.button!==0)return;
       const r=host.getBoundingClientRect();held=false;dragging=false;start={x:e.clientX,y:e.clientY,left:r.left,top:r.top};
-      button.setPointerCapture(e.pointerId);
+      button.setPointerCapture(e.pointerId);press(true);
+      warmTimer=setTimeout(()=>{if(start&&!dragging&&!open)prefetch();},250);
       timer=setTimeout(()=>{if(start&&!dragging){held=true;toggle(true);}},500);
     };
     button.onpointermove=e=>{
       if(!start)return;const dx=e.clientX-start.x,dy=e.clientY-start.y;
-      if(Math.abs(dx)+Math.abs(dy)>10){dragging=true;clearTimeout(timer);}
+      if(Math.abs(dx)+Math.abs(dy)>10){dragging=true;clearTimeout(timer);clearTimeout(warmTimer);press(false);}
       if(!dragging)return;const v=viewport();
       host.style.setProperty("left",Math.max(v.x+4,Math.min(v.x+v.width-54,start.left+dx))+"px","important");
       host.style.setProperty("top",Math.max(v.y+4,Math.min(v.y+v.height-54,start.top+dy))+"px","important");
     };
     button.onpointerup=e=>{
-      if(!start)return;clearTimeout(timer);suppressUntil=Date.now()+800;
+      if(!start)return;clearTimeout(timer);clearTimeout(warmTimer);press(false);suppressUntil=Date.now()+800;
       const moved=dragging;start=null;dragging=false;
       if(moved){
         const v=viewport(),r=host.getBoundingClientRect(),top=r.top+25<v.y+v.height/2;
@@ -70,7 +84,7 @@
       if(button.hasPointerCapture(e.pointerId))button.releasePointerCapture(e.pointerId);
     };
     button.onpointercancel=()=>{suppressUntil=Date.now()+800;cancel();position();};
-    button.oncontextmenu=e=>{e.preventDefault();clearTimeout(timer);held=true;suppressUntil=Date.now()+800;toggle(true);};
+    button.oncontextmenu=e=>{e.preventDefault();clearTimeout(timer);clearTimeout(warmTimer);press(false);held=true;suppressUntil=Date.now()+800;toggle(true);};
     button.onclick=()=>{if(Date.now()>=suppressUntil)tap();};
     document.documentElement.append(host);position();if(failed)reportError(Error(failed));
   }
@@ -96,7 +110,7 @@
     }catch(e){retryAt=Date.now()+5000;reportError(e);}finally{inFlight=false;}
   }
   async function updateOptions(){
-    try {options=await call({type:"STATUS"});mount();position();}
+    try {options=await call({type:"STATUS",lite:true});mount();position();}
     catch(e){if(e.message.includes("Private Browsing")){host?.remove();return;}reportError(e);mount();}
   }
   document.addEventListener("click",e=>{
@@ -129,7 +143,7 @@
     if(document.hidden)return;visit();
     if(document.title!==lastTitle&&navId){lastTitle=document.title;call({type:"TITLE",title:lastTitle,navigationId:navId}).catch(reportError);}
   },750);
-  call({type:"STATUS"}).then(s=>{
+  call({type:"STATUS",lite:true}).then(s=>{
     options=s;ready=true;mount();const type=performance.getEntriesByType("navigation")[0]?.type;
     visit(false,type==="back_forward"?"traverse":type==="reload"?"reload":"load");
   }).catch(e=>{if(!e.message.includes("Private Browsing")){reportError(e);mount();}});

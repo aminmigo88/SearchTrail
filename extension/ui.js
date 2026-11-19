@@ -1,7 +1,7 @@
 "use strict";
-globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false}={}) {
+globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true}={}) {
   const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text)n.textContent=text;return n;};
-  const style=el("style");style.textContent=SearchTrailCSS;root.append(style);
+  if(css){const style=el("style");style.textContent=SearchTrailCSS;root.append(style);}
   const box=el("section","st panel"+(popup?" popup-panel":""));box.dir="ltr";box.setAttribute("aria-label","SearchTrail");root.append(box);
   const top=el("div","row top");top.append(el("h1","","SearchTrail"),el("span","version","0.2"));
   const close=el("button","close","Close");close.onclick=onClose;if(!popup)top.append(close);box.append(top);
@@ -31,7 +31,7 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false}={}) {
   settingsPage.append(el("p","muted","Saved locally on permitted websites. Private tabs are excluded. Older visits keep their history but have no reconstructed path. Missing or ambiguous navigation links are not guessed."));
   const nav=el("nav","nav");nav.setAttribute("aria-label","SearchTrail sections");box.append(nav);
   const pages={trail:trailPage,history:historyPage,settings:settingsPage},buttons={};
-  let view="trail",limit=100,generation=0,timer;
+  let view="trail",generation=0,timer,cursor=null,shown=0,total=0;
   for(const [key,label] of [["trail","Trail"],["history","History"],["settings","Settings"]]){const b=el("button","",label);buttons[key]=b;b.onclick=()=>show(key);nav.append(b);}
   async function action(fn){error.textContent="";try{return await fn();}catch(e){error.textContent=e.message;return null;}}
   function labelURL(url){try{const u=new URL(url);let path=u.pathname;try{path=decodeURIComponent(path);}catch{}return u.hostname+(path==="/"?"":path);}catch{return url;}}
@@ -42,7 +42,7 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false}={}) {
   function renderTree(data){
     tree.replaceChildren();
     if(!data.items.length){treeNote.textContent="No path for this page yet. Follow a link on a permitted website, or open History.";return;}
-    treeNote.textContent=`${data.total} pages in this trail · Current path highlighted`+(data.total>data.items.length?` · Showing ${data.items.length}`:"")+(data.missingParent?" · An earlier page was deleted":"");
+    treeNote.textContent=`${data.total} pages in this trail · Current path highlighted`+(data.total>data.items.length?` · Showing ${data.items.length}`:"")+(data.hidden?" · Older pages not shown":"")+(data.missingParent?" · An earlier page was deleted":"");
     const children=new Map(),ids=new Set(data.items.map(n=>n.id)),path=new Set(data.ancestors.map(n=>n.id));
     for(const n of data.items){const key=ids.has(n.parentId)?n.parentId:null;if(!children.has(key))children.set(key,[]);children.get(key).push(n);}
     for(const group of children.values())group.sort((a,b)=>a.at-b.at);
@@ -58,35 +58,41 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false}={}) {
       }
     }
   }
-  async function refresh(){
+  function applyStatus(s){
+    back.disabled=!s.source;back.textContent=s.source?"↩ Return to source":"No source linked yet";
+    back.onclick=()=>action(async()=>{const r=await call({type:"RETURN"});if(r?.none)throw Error("No source page was recorded. Long-press for your trail and history.");onClose();});
+    sourceText.textContent=s.source?(s.sourceOpen?"Open source: ":"Load saved source: ")+(s.source.title||s.source.url):"A tap returns directly; a hold shows your path.";
+    paused.checked=s.settings.paused;intercept.checked=s.settings.interceptGoogle;
+    placement.value=s.settings.placement||"bottom-right";clearance.value=s.settings.clearance??16;
+    status.textContent=s.settings.paused?"Recording paused":s.excluded?"This site is excluded":"Recording permitted, non-private webpages";
+    exclude.textContent=s.settings.excludedHosts.includes(s.host)?"Include this site":"Exclude this site";
+  }
+  function updateCount(){count.textContent=`${shown} shown · ${total} pages saved`;if(!shown&&!list.querySelector(".empty"))list.append(el("li","empty","No saved pages match yet."));}
+  // Adds one page of rows; earlier rows are kept, so "Show more" never redraws the list.
+  function appendRows(data){
+    total=data.total;cursor=data.cursor;
+    for(const v of data.items){
+      const row=el("li","visit"),b=pageButton(v),del=el("button","delete","×");
+      b.append(el("span","time",new Date(v.at).toLocaleString()));b.onclick=()=>action(async()=>{await call({type:"OPEN_VISIT",id:v.id});onClose();});
+      del.setAttribute("aria-label","Delete visit: "+(v.title||v.url));
+      del.onclick=()=>action(async()=>{await call({type:"DELETE",id:v.id});row.remove();shown--;total=Math.max(0,total-1);updateCount();});
+      row.append(b,del);list.append(row);shown++;
+    }
+    load.hidden=!data.more;updateCount();
+  }
+  async function refresh(withStatus=true){
     const g=++generation;
     await action(async()=>{
-      const [s,data]=await Promise.all([call({type:"STATUS"}),view==="trail"?call({type:"TREE"}):view==="history"?call({type:"LIST",query:query.value,limit}):Promise.resolve(null)]);
+      const [s,data]=await Promise.all([withStatus?call({type:"STATUS"}):null,view==="trail"?call({type:"TREE"}):view==="history"?call({type:"LIST",query:query.value}):null]);
       if(g!==generation)return;
-      back.disabled=!s.source;back.textContent=s.source?"↩ Return to source":"No source linked yet";
-      back.onclick=()=>action(async()=>{await call({type:"RETURN"});onClose();});
-      sourceText.textContent=s.source?(s.sourceOpen?"Open source: ":"Load saved source: ")+(s.source.title||s.source.url):"A tap returns directly; a hold shows your path.";
-      paused.checked=s.settings.paused;intercept.checked=s.settings.interceptGoogle;
-      placement.value=s.settings.placement||"bottom-right";clearance.value=s.settings.clearance??16;
-      status.textContent=s.settings.paused?"Recording paused":s.excluded?"This site is excluded":"Recording permitted, non-private webpages";
-      exclude.textContent=s.settings.excludedHosts.includes(s.host)?"Include this site":"Exclude this site";
+      if(s)applyStatus(s);
       if(view==="trail")renderTree(data);
-      if(view==="history"){
-        count.textContent=`${data.items.length} shown · ${data.total} pages saved`;
-        list.replaceChildren();if(!data.items.length)list.append(el("li","empty","No saved pages match yet."));
-        for(const v of data.items){
-          const row=el("li","visit"),b=pageButton(v),del=el("button","delete","×");
-          b.append(el("span","time",new Date(v.at).toLocaleString()));b.onclick=()=>action(async()=>{await call({type:"OPEN_VISIT",id:v.id});onClose();});
-          del.setAttribute("aria-label","Delete visit: "+(v.title||v.url));del.onclick=()=>action(async()=>{await call({type:"DELETE",id:v.id});await refresh();});
-          row.append(b,del);list.append(row);
-        }
-        load.hidden=data.items.length>=data.matches;load.disabled=limit>=20000;
-      }
+      if(view==="history"){list.replaceChildren();shown=0;appendRows(data);}
     });
   }
   function show(next){view=pages[next]?next:"trail";for(const [key,p] of Object.entries(pages)){p.hidden=key!==view;buttons[key].setAttribute("aria-current",String(key===view));}scroll.scrollTop=0;refresh();}
-  query.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{limit=100;refresh();},180);};
-  load.onclick=()=>{limit+=100;refresh();};
+  query.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>refresh(false),150);};
+  load.onclick=()=>{const g=generation;load.disabled=true;action(async()=>{const data=await call({type:"LIST",query:query.value,cursor});if(g===generation)appendRows(data);}).finally(()=>{load.disabled=false;});};
   paused.onchange=()=>action(async()=>{await call({type:"SETTINGS",paused:paused.checked});await refresh();});
   intercept.onchange=()=>action(async()=>{await call({type:"SETTINGS",interceptGoogle:intercept.checked});await refresh();});
   placement.onchange=()=>action(()=>call({type:"SETTINGS",placement:placement.value}));

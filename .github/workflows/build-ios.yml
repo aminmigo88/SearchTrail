@@ -8,27 +8,40 @@ on:
       - 'scripts/**'
       - 'tests/**'
       - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/build-ios.yml'
 permissions:
   contents: read
 jobs:
-  build:
-    runs-on: macos-latest
-    timeout-minutes: 20
+  test:
+    # Logic and WebKit interface checks run on Linux, which uses far fewer Actions minutes than macOS.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
       - name: Verify source and behavior
         run: |
           npm run check
           npm test
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Cache WebKit
+        id: webkit-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-webkit-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install WebKit
+        if: steps.webkit-cache.outputs.cache-hit != 'true'
+        run: npx playwright install webkit
+      - name: Install WebKit system libraries
+        run: npx playwright install-deps webkit
       - name: Verify WebKit interface and gestures
-        run: |
-          npm install --ignore-scripts --no-package-lock
-          npx playwright install webkit
-          npm run test:ui
+        run: npm run test:ui
       - name: Save interface test screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -37,6 +50,12 @@ jobs:
           path: dist/ui-*.png
           if-no-files-found: ignore
           retention-days: 7
+  build:
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
       - name: Build unsigned iPhone package
         run: bash scripts/build-ios.sh
       - name: Save iPhone package

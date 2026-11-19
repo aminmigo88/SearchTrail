@@ -163,7 +163,7 @@ test('SPA route and restored document maintain their path',async()=>{
 test('deleted parents are indicated; clear removes all paths and live mappings',async()=>{
   const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');await follow(h,1,'https://example.com/b','b');
   await h.send(1,'DELETE',{id:'a'});assert.equal((await h.send(1,'TREE')).data.missingParent,true);
-  assert.equal((await h.send(1,'RETURN')).ok,false);
+  assert.equal((await h.send(1,'RETURN')).data.none,true);
   await h.send(1,'CLEAR');assert.equal((await h.send(1,'LIST')).data.total,0);assert.equal((await h.send(1,'TREE')).data.items.length,0);
 });
 test('private tabs cannot read paths or change settings',async()=>{
@@ -199,4 +199,53 @@ test('a managed new-tab redirect retains its known opener',async()=>{
   const h=harness();h.add(1,'https://forum.example/thread');await h.visit(1,'source');
   await h.send(1,'OPEN_LINK',{href:'https://redirect.example/go'});h.tabMap.get(10).url='https://destination.example/article';await h.visit(10,'destination');
   assert.equal((await h.send(10,'STATUS')).data.source.id,'source');
+});
+test('history pages by cursor without repeats and search stops after one page',async()=>{
+  const h=harness();h.add(1,'https://example.com/start');
+  for(let i=0;i<250;i++){h.tabMap.get(1).url='https://example.com/p'+i;h.tabMap.get(1).title=i%2?'odd '+i:'even '+i;await h.visit(1,'n'+i,{kind:'load',referrer:''});}
+  const seen=new Set();let page=(await h.send(1,'LIST')).data;
+  assert.equal(page.total,250);assert.equal(page.items.length,100);assert.equal(page.more,true);
+  while(true){for(const v of page.items){assert.ok(!seen.has(v.id));seen.add(v.id);}if(!page.more)break;page=(await h.send(1,'LIST',{cursor:page.cursor})).data;}
+  assert.equal(seen.size,250);
+  const odd=(await h.send(1,'LIST',{query:'ODD'})).data;assert.equal(odd.items.length,100);assert.equal(odd.more,true);
+  assert.ok(odd.items.every(v=>v.title.startsWith('odd')));
+  const one=(await h.send(1,'LIST',{query:'p249'})).data;assert.equal(one.items.length,1);assert.equal(one.more,false);
+});
+test('title updates and deletions keep the history index in step',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');
+  await h.send(1,'TITLE',{title:'Renamed page',navigationId:'a'});
+  assert.equal((await h.send(1,'LIST',{query:'renamed'})).data.items.length,1);
+  await h.send(1,'DELETE',{id:'a'});const l=(await h.send(1,'LIST')).data;assert.equal(l.total,0);assert.equal(l.items.length,0);
+  assert.equal(Object.keys(h.local).filter(k=>k.startsWith('day:')).length,0);
+});
+test('existing history is indexed once on upgrade, including 0.2 trails',async()=>{
+  const local={
+    'visit:r':{id:'r',url:'https://example.com/r',title:'Root',at:1000,parentId:null,rootId:'r',graphVersion:2},
+    'visit:k':{id:'k',url:'https://example.com/k',title:'Kid',at:2000,parentId:'r',rootId:'r',graphVersion:2},
+    'visit:old':{id:'old',url:'https://example.com/old',title:'Old',at:500}
+  };
+  const h=harness(local);h.tabMap.set(1,{id:1,url:'https://example.com/k',title:'Kid',incognito:false});
+  h.session['tab:1']={token:'t',url:'https://example.com/k',navigationId:'k',currentId:'k',documents:{k:'k'}};
+  const l=(await h.send(1,'LIST')).data;assert.equal(l.total,3);assert.deepEqual(Array.from(l.items,v=>v.id),['k','r','old']);
+  const t=(await h.send(1,'TREE')).data;assert.deepEqual(Array.from(t.ancestors,n=>n.id),['r','k']);
+  assert.equal((await h.send(1,'STATUS')).data.source.id,'r');
+  assert.ok(h.local.idx);
+});
+test('long trails are split into bounded segments and the tree stays bounded',async()=>{
+  const h=harness();h.add(1,'https://spa.example/0');await h.visit(1,'s0');
+  for(let i=1;i<700;i++){h.tabMap.get(1).url='https://spa.example/'+i;await h.visit(1,'s'+i,{kind:'route'});}
+  const segs=Object.entries(h.local).filter(([k])=>k.startsWith('seg:'));
+  assert.ok(segs.length>=3);assert.ok(segs.every(([,s])=>s.ids.length<=250));
+  const t=(await h.send(1,'TREE')).data;
+  assert.equal(t.currentId,'s699');assert.ok(t.items.length<=300);assert.ok(t.ancestors.length<=150);assert.equal(t.hidden,true);
+  assert.equal((await h.send(1,'STATUS')).data.source.id,'s698');
+  const st=h.session['tab:1'];assert.ok(st.stack.length<=100);assert.ok(Object.keys(st.documents).length<=100);
+});
+test('a tap with no source reports it without an error',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');
+  const r=await h.send(1,'RETURN');assert.equal(r.ok,true);assert.equal(r.data.none,true);
+});
+test('lite status skips the source lookup',async()=>{
+  const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');
+  const d=(await h.send(1,'STATUS',{lite:true})).data;assert.equal(d.source,undefined);assert.equal(d.settings.placement,'bottom-right');
 });
