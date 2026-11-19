@@ -70,15 +70,28 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   const panel=await page.locator('.panel').boundingBox(),launcher=await page.locator('.launcher:not(.menu-launcher)').boundingBox();
   assert.ok(panel.y>=200 && panel.y+panel.height>launcher.y+launcher.height,'Sheet should extend behind the floating buttons');
   assert.ok(launcher.y+launcher.height<=790 && launcher.y>700,'Button should be near bottom');
+  // One-handed layout: tabs in one row at the bottom beside the buttons, nothing covered by them.
+  assert.equal(await page.getByRole('button',{name:'Close',exact:true}).count(),0,'No Close button at the top');
+  let dockBox=await page.locator('.dock').boundingBox(),navBox=await page.locator('.nav').boundingBox();
+  assert.ok(navBox.height<=60&&panel.y+panel.height-(navBox.y+navBox.height)<=24,'Tabs form one row at the bottom of the menu');
+  assert.ok(navBox.x+navBox.width<=dockBox.x,'Tabs stay clear of the floating buttons');
+  assert.ok((await page.locator('.pad-bottom').boundingBox()).height>0,'Extra scroll room lets rows move clear of the buttons');
+  const here=await page.locator('.tree .current>.open').boundingBox(),body=await page.locator('.body').boundingBox();
+  assert.ok(here.y+here.height/2>body.y+body.height/2,'You are here sits in the lower half of the menu');
   fs.mkdirSync(path.join(__dirname,'../dist'),{recursive:true});
   await page.screenshot({path:path.join(__dirname,'../dist/ui-rtl-trail.png')});
   await page.getByRole('button',{name:'Bookmarks',exact:true}).click();
   await page.getByRole('button',{name:'☆ Save this page',exact:true}).click();await eventually(()=>page.locator('.visit:visible').count().then(n=>n===1));
   await page.getByRole('button',{name:'History',exact:true}).click();
   await page.getByRole('searchbox').fill('another');await eventually(()=>page.locator('.visit:visible').count().then(n=>n===1));
+  const searchBox=await page.getByRole('searchbox').boundingBox();navBox=await page.locator('.nav').boundingBox();dockBox=await page.locator('.dock').boundingBox();
+  assert.ok(searchBox.y+searchBox.height<=navBox.y+1&&navBox.y-(searchBox.y+searchBox.height)<=12,'History search sits just above the tabs');
+  assert.ok(searchBox.x+searchBox.width<=dockBox.x,'Search box stays clear of the floating buttons');
+  await page.screenshot({path:path.join(__dirname,'../dist/ui-history-bottom-search.png')});
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByLabel('Button placement',{exact:true}).selectOption('bottom-left');
   await eventually(()=>page.locator('.launcher:not(.menu-launcher)').boundingBox().then(b=>b.x<20));
+  await eventually(async()=>{const d=await page.locator('.dock').boundingBox(),n=await page.locator('.nav').boundingBox();return n.x>=d.x+d.width;});
   await page.locator('.menu-launcher').click();await page.locator('.panel').waitFor({state:'hidden'});
   const treeRequests=requests.filter(m=>m.type==='TREE').length;
   await page.locator('.menu-launcher').click();await page.locator('.panel').waitFor({state:'visible'});
@@ -93,7 +106,7 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   assert.ok(smallPanel.y>=0&&smallPanel.y+smallPanel.height<=440,'Resized viewport must contain panel');
   assert.ok(nav.y+nav.height<=smallPanel.y+smallPanel.height,'Controls remain inside sheet');
   await page.screenshot({path:path.join(__dirname,'../dist/ui-small-viewport.png')});
-  await page.getByRole('button',{name:'Close',exact:true}).click();
+  await page.locator('.menu-launcher').click();await page.locator('.panel').waitFor({state:'hidden'});
   await page.setViewportSize({width:320,height:640});
   await page.locator('.menu-launcher').click();
   for(const corner of ['top-left','top-right','bottom-right','bottom-left']){
@@ -104,13 +117,14 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
     for(const name of ['Trail','History','Bookmarks','Settings'])await page.getByRole('button',{name,exact:true}).click();
   }
   await page.screenshot({path:path.join(__dirname,'../dist/ui-narrow-settings.png')});
-  await page.locator('.menu-launcher').click();
+  // A tap on the page outside the menu closes it.
+  await page.mouse.click(10,10);await page.locator('.panel').waitFor({state:'hidden'});
   await page.setViewportSize({width:440,height:800});
   const before=requests.length;await page.locator('#blank').click();await eventually(()=>requests.slice(before).some(m=>m.type==='OPEN_LINK'));
   assert.equal(page.url(),'https://example.test/details','Managed new-tab link must leave the source page intact');
   await page.locator('#same').click();await page.waitForURL('https://example.test/next');
   assert.ok(requests.some(m=>m.type==='LINK_INTENT'&&m.href==='https://example.test/next'),'Same-tab link should record intent');
-  console.log('WebKit checks passed: direct tap, stacked menu button, swipe to hide and restore, hold, branching tree, RTL isolation, history filter, saved placement, viewport resizing, generic links. Extension APIs simulated.');
+  console.log('WebKit checks passed: direct tap, stacked menu button, swipe to hide and restore, hold, one-handed bottom tabs and search, close by tapping outside, branching tree, RTL isolation, history filter, saved placement, viewport resizing, generic links. Extension APIs simulated.');
  }catch(e){fs.mkdirSync(path.join(__dirname,'../dist'),{recursive:true});await page.screenshot({path:path.join(__dirname,'../dist/ui-failure.png')}).catch(()=>{});throw e;}
  finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

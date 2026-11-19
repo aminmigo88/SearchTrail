@@ -1,6 +1,14 @@
-# SearchTrail 0.3.0 — Safari browsing trails
+# SearchTrail 0.3.1 — Safari browsing trails
 
 Tap the floating arrow to return directly to the page that led here. Tap the separate ☰ button for a branching trail, saved history, bookmarks and settings. Holding the arrow is still an optional shortcut. Sources can be any permitted HTTP/HTTPS website.
+
+## New in 0.3.1
+
+- **Glass buttons:** the arrow and menu buttons are clear, blurred glass with a coloured symbol, so the page stays visible behind them. The arrow turns red when SearchTrail reports an error.
+- **Stacked menu button:** ☰ sits directly above the arrow. Swipe it toward the screen edge to tuck it into a thin tab; drag the tab back out, or tap it, to show it again. The choice is saved across websites. Holding the arrow still opens the menu while ☰ is tucked away. Safari's own edge swipe (Back from the left edge, Forward from the right) can take a drag that starts at the very edge; tapping the tab always works.
+- **One-handed menu:** the menu opens up from the bottom edge with the buttons floating over its corner. Section tabs form one row along the bottom, and the History and Bookmarks search boxes sit just above them. Only what the buttons actually cover is moved aside; list rows can scroll underneath the see-through buttons, with extra room so every row can be moved clear. Short pages sit at the bottom of the menu, and the Trail opens with "You are here" in its lower part. Close with × on the menu button or by tapping the page outside the menu; there is no Close button at the top. Placing the buttons bottom-left mirrors the layout.
+- The version number is no longer shown in the menu.
+- **Speed:** menu data starts loading when ☰ is touched, or 0.25 s into holding the arrow. History pages and searches read stored days in growing batches (a search with few matches over 100,000 visits takes about 16 storage reads instead of 200). The interrupted delete/clear journal is checked once per background start instead of on every action.
 
 ## New in 0.3
 
@@ -10,14 +18,14 @@ Tap the floating arrow to return directly to the page that led here. Tap the sep
 - Recovery journal for interrupted deletion/clear; Repair history index rebuilds derived data while retaining visits.
 - Bounded 250-row history chunks and trail segments, including migration of existing data. Truncated tab memory no longer guesses the identity of repeated URLs.
 - Large trees clearly label partial views. Earlier path walks farther back; All trail pages opens paged history filtered to that trail. Branches can collapse. Deep paths stop adding horizontal indentation.
-- Version displayed from the manifest; iOS marketing version derives from the same manifest. Build number uses the Actions run number.
+- iOS marketing version derives from the manifest version. Build number uses the Actions run number.
 
 ## Navigation
 
 - **Tap:** return to the immediate source without opening the panel. An existing source tab is activated directly. If that page is no longer open, its saved URL loads in the current tab. Result tabs are not closed automatically.
 - **Hold for half a second:** open the trail tree. The current path is highlighted; sibling branches remain visible. Tap any saved node to revisit it. To jump farther back than the immediate source, select an ancestor in the tree.
 - **Any website:** ordinary same-tab links retain normal website behavior. SearchTrail observes their source. Normal `_blank` links are opened with explicit source tracking. Google result links still open in a new tab by default; this is optional in Settings.
-- **Bottom sheet:** the smaller panel and its Trail / History / Settings controls sit near the button. Default button location is bottom-right, with 16 px clearance inside the webpage viewport.
+- **Bottom sheet:** the menu opens from the bottom edge; its Trail / History / Bookmarks / Settings tabs and search boxes sit at the bottom, beside the buttons. Default button location is bottom-right, with 16 px clearance inside the webpage viewport.
 - **Saved placement:** hold the button → Settings → choose one of four corners and an edge distance. Dragging the button also saves the nearest corner and distance. Settings apply across websites. These settings are in the Safari extension panel/popup, not the native container app.
 - **Arabic and other RTL pages:** the controls keep their own layout direction; page titles can display in their own writing direction. URLs are displayed readably without exposing a long encoded query in each row.
 - Existing 0.1 visit records remain available in History. Their missing navigation relationships are not reconstructed.
@@ -37,6 +45,8 @@ No certificate, provisioning profile or private key belongs in this repository. 
 - Open ☰ directly and confirm the arrow still returns to the source while the panel is open. Check that both buttons remain touchable above the sheet at all four placements.
 - Save a bookmark, clear history, reopen the bookmark. Export and restore a backup. Confirm Safari bookmarks are unchanged.
 - Check portrait/landscape and keyboard appearance at narrow widths; the bottom navigation and floating buttons must not overlap.
+- Swipe ☰ toward the edge, reload and visit another website: it should stay tucked. Bring it back by dragging and by tapping the tab, at both right and left placements (watch for Safari's edge swipe at the left edge).
+- Open History, tap the bottom search box and type: the box and tabs must stay visible above the keyboard. Tap the page outside the menu: it should close.
 
 - From any ordinary website, open a link in the same tab. Tap the arrow: it should load the source in this tab. If the source still exists in another tracked tab, that tab should activate instead.
 - On Google, open several results. A tap on each should return directly to its search. Open a second search and verify each result returns to the correct source.

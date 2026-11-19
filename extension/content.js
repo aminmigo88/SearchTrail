@@ -4,7 +4,7 @@
   globalThis.__searchTrailLoaded=true;
   const C=SearchTrailCore;
   const makeId=()=>Array.from(crypto.getRandomValues(new Uint32Array(4)),n=>n.toString(16)).join("-");
-  let host,shadow,button,menuButton,dock,panelRoot,ui,open=false,options,lastURL,navId,lastTitle,failed,pendingVisit,inFlight=false,retryAt=0,dragging=false,ready=false;
+  let host,shadow,button,menuButton,dock,scrim,panelRoot,ui,open=false,options,lastURL,navId,lastTitle,failed,pendingVisit,inFlight=false,retryAt=0,dragging=false,ready=false;
   const routes=[];
   async function call(message) {
     const response=await browser.runtime.sendMessage(message);
@@ -39,7 +39,7 @@
   }
   function setMenuHidden(value){
     if(options?.settings)options.settings.menuHidden=value;
-    applyMenuState();
+    applyMenuState();position();
     call({type:"SETTINGS",menuHidden:value}).catch(reportError);
   }
   function reportError(e) {failed=e.message;if(button){button.classList.add("bad");button.title=failed;}ui?.error(failed);}
@@ -53,16 +53,13 @@
     applyMenuState();
     const panelWidth=Math.min(400,v.width-16),panelHeight=Math.min(560,Math.max(180,v.height*.68),v.height-16);
     const panelY=top?v.y+8:v.y+v.height-panelHeight-8;
-    panelRoot.style.cssText=`position:fixed;z-index:0;left:${v.x+(left?8:v.width-panelWidth-8)}px;top:${panelY}px;--sheet-width:${panelWidth}px;--sheet-height:${panelHeight}px;--sheet-origin:${top?"top":"bottom"} center;direction:ltr;`;
-    // Reserve only the occupied corner of the footer/header, not a blank strip below the sheet.
-    panelRoot.dataset.dock=top?"top":"bottom";
-    panelRoot.style.setProperty("--dock-left",left?"62px":"0px");
-    panelRoot.style.setProperty("--dock-right",left?"0px":"62px");
-    dock.style.zIndex="2";
+    panelRoot.style.cssText=`position:fixed;z-index:1;left:${v.x+(left?8:v.width-panelWidth-8)}px;top:${panelY}px;--sheet-width:${panelWidth}px;--sheet-height:${panelHeight}px;--sheet-origin:${top?"top":"bottom"} center;direction:ltr;`;
+    // The menu reaches the screen edge behind the buttons; only what they cover is moved aside.
+    if(open&&ui)ui.avoid((menuHidden()?button:dock).getBoundingClientRect());
 
   }
   function toggle(value,view="trail") {
-    open=value;panelRoot.hidden=!open;menuButton.setAttribute("aria-expanded",String(open));applyMenuState();
+    open=value;panelRoot.hidden=!open;scrim.hidden=!open;menuButton.setAttribute("aria-expanded",String(open));applyMenuState();
     if(open){if(!ui)ui=SearchTrailUI(panelRoot,uiCall,{onClose:()=>toggle(false),css:false,initialView:view});else ui.show(view);if(failed)ui.error(failed);}
     position();
   }
@@ -77,7 +74,8 @@
     host=document.createElement("div");host.setAttribute("dir","ltr");
     host.style.cssText="all:initial!important;position:fixed!important;z-index:2147483647!important;display:block!important;direction:ltr!important;";
     shadow=host.attachShadow({mode:"closed"});const style=document.createElement("style");style.textContent=SearchTrailCSS;shadow.append(style);
-    panelRoot=document.createElement("div");panelRoot.hidden=true;shadow.append(panelRoot);
+    scrim=document.createElement("div");scrim.className="scrim";scrim.hidden=true;scrim.onclick=()=>toggle(false);
+    panelRoot=document.createElement("div");panelRoot.hidden=true;shadow.append(scrim,panelRoot);
     button=document.createElement("button");button.className="launcher";button.textContent="↩\uFE0E";button.title="Return to source page";
     button.setAttribute("aria-label","Return to source page");
     dock=document.createElement("div");dock.className="dock";

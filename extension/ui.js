@@ -3,11 +3,15 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
   const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text)n.textContent=text;return n;};
   if(css){const style=el("style");style.textContent=SearchTrailCSS;root.append(style);}
   const box=el("section","st panel"+(popup?" popup-panel":""));box.dir="ltr";box.setAttribute("aria-label","SearchTrail");root.append(box);
-  const top=el("div","row top");top.append(el("h1","","SearchTrail"));
-  const close=el("button","close","Close");close.onclick=onClose;if(!popup)top.append(close);box.append(top);
+  // Closing is done from the bottom: the × on the menu button, or a tap on the page outside.
+  const top=el("div","row top");top.append(el("h1","","SearchTrail"));box.append(top);
   const error=el("p","error");error.setAttribute("role","status");box.append(error);
   const scroll=el("div","body");box.append(scroll);
-  const trailPage=el("div"),historyPage=el("div"),bookmarksPage=el("div"),settingsPage=el("div");scroll.append(trailPage,historyPage,bookmarksPage,settingsPage);
+  const markScrolled=()=>scroll.classList.toggle("scrolled",scroll.scrollTop>2);scroll.addEventListener("scroll",markScrolled,{passive:true});
+  // Spacers give extra scroll room where the floating buttons cover the list, so every row
+  // can be moved clear of them. Short pages sit at the bottom of the menu, near the thumb.
+  const padTop=el("div","pad-top"),padBottom=el("div","pad-bottom");
+  const trailPage=el("div","page"),historyPage=el("div","page"),bookmarksPage=el("div","page"),settingsPage=el("div","page");scroll.append(padTop,trailPage,historyPage,bookmarksPage,settingsPage,padBottom);
   const back=el("button","primary","Return to source");trailPage.append(back);
   const sourceText=el("p","muted");sourceText.dir="auto";trailPage.append(sourceText);
   const treeNote=el("p","muted");trailPage.append(treeNote);
@@ -16,9 +20,9 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
   const tree=el("ul","tree");trailPage.append(tree);
   const bookmarkCurrent=el("button","primary","☆ Save this page");bookmarksPage.append(bookmarkCurrent);
   bookmarksPage.append(el("p","muted","SearchTrail bookmarks are saved locally, separately from Safari bookmarks. They stay saved when you delete history."));
-  const bookmarkQuery=el("input");bookmarkQuery.type="search";bookmarkQuery.placeholder="Find a bookmark…";bookmarkQuery.setAttribute("aria-label","Search bookmarks");bookmarksPage.append(bookmarkQuery);
+  const bookmarkQuery=el("input");bookmarkQuery.type="search";bookmarkQuery.placeholder="Find a bookmark…";bookmarkQuery.setAttribute("aria-label","Search bookmarks");
   const bookmarkList=el("ul","visits");bookmarksPage.append(bookmarkList);
-  const query=el("input");query.type="search";query.placeholder="Find a page or website…";query.setAttribute("aria-label","Search recorded visits");historyPage.append(query);
+  const query=el("input");query.type="search";query.placeholder="Find a page or website…";query.setAttribute("aria-label","Search recorded visits");
   const count=el("p","muted");historyPage.append(count);
   const list=el("ul","visits");historyPage.append(list);
   const load=el("button","load","Show more");historyPage.append(load);
@@ -28,7 +32,7 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
   const placeLabel=el("label","setting");placeLabel.append(el("span","","Corner"),placement);settingsPage.append(placeLabel);
   const clearance=el("input");clearance.type="range";clearance.min="8";clearance.max="120";clearance.setAttribute("aria-label","Distance from screen edge");
   const clearanceLabel=el("label","setting");clearanceLabel.append(el("span","","Edge distance"),clearance);settingsPage.append(clearanceLabel);
-  settingsPage.append(el("p","muted","Tap the arrow to return. Tap ☰ for this menu. Drag the arrow to move both buttons. Placement is saved across websites."));
+  settingsPage.append(el("p","muted","Tap the arrow to return. Tap ☰ for this menu, or swipe ☰ to the side to hide it; drag out or tap its tab to bring it back. Drag the arrow to move both buttons. Placement is saved across websites."));
   const paused=el("input");paused.type="checkbox";const pl=el("label");pl.append(paused,document.createTextNode("Pause recording"));settingsPage.append(pl);
   const intercept=el("input");intercept.type="checkbox";const il=el("label");il.append(intercept,document.createTextNode("Open Google results in new tabs"));settingsPage.append(il);
   const status=el("p","good");settingsPage.append(status);
@@ -36,10 +40,33 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
   const exclude=el("button","","Exclude this site"),exportBtn=el("button","","Export history"),clear=el("button","danger","Delete history");const importBtn=el("button","","Restore backup"),repair=el("button","","Repair history index"),file=el("input");file.type="file";file.accept=".json,application/json";file.hidden=true;
   controls.append(exclude,exportBtn,importBtn,repair,clear,file);
   settingsPage.append(el("p","muted","Saved locally on permitted websites. Private tabs are excluded. Older visits keep their history but have no reconstructed path. Missing or ambiguous navigation links are not guessed."));
-  const nav=el("nav","nav");nav.setAttribute("aria-label","SearchTrail sections");box.append(nav);
+  // Search boxes and section tabs sit at the bottom, within thumb reach.
+  const foot=el("div","foot"),nav=el("nav","nav");nav.setAttribute("aria-label","SearchTrail sections");foot.append(query,bookmarkQuery,nav);box.append(foot);
   const pages={trail:trailPage,history:historyPage,bookmarks:bookmarksPage,settings:settingsPage},buttons={};
   let view="trail",generation=0,timer,cursor=null,shown=0,total=0,focusId=null,trailRoot=null,historyRoot=null;
   for(const [key,label] of [["trail","Trail"],["history","History"],["bookmarks","Bookmarks"],["settings","Settings"]]){const b=el("button","",label);buttons[key]=b;b.onclick=()=>show(key);nav.append(b);}
+  // Keeps controls clear of the floating buttons. r is the buttons' area on screen (or null);
+  // only the parts of the menu they actually cover are adjusted, on whichever side they are.
+  let avoidRect=null;
+  function avoid(r){
+    if(r!==undefined)avoidRect=r;
+    const props=["--nav-l","--nav-r","--search-l","--search-r","--head-l","--head-r","--pad-t","--pad-b"];
+    for(const k of props)box.style.setProperty(k,"0px");
+    r=avoidRect;if(!r||popup||!box.isConnected||!box.getClientRects().length)return;
+    const b=box.getBoundingClientRect(),cs=getComputedStyle(box),gap=8;
+    const innerL=b.left+parseFloat(cs.paddingLeft),innerR=b.right-parseFloat(cs.paddingRight);
+    if(r.right<=innerL||r.left>=innerR||r.bottom<=b.top||r.top>=b.bottom)return;
+    const set=(k,v)=>box.style.setProperty(k,Math.max(0,Math.round(v))+"px");
+    const right=r.left+r.width/2>b.left+b.width/2,insetL=right?0:r.right+gap-innerL,insetR=right?innerR-(r.left-gap):0;
+    const covers=n=>{if(n.hidden)return false;const x=n.getBoundingClientRect();return x.height>0&&x.bottom>r.top-gap&&x.top<r.bottom+gap;};
+    if(covers(nav)){set("--nav-l",insetL);set("--nav-r",insetR);}
+    if(covers(query)||covers(bookmarkQuery)){set("--search-l",insetL);set("--search-r",insetR);}
+    if(covers(top)){set("--head-l",insetL);set("--head-r",insetR);}
+    const sb=scroll.getBoundingClientRect();
+    if(r.top+r.height/2>b.top+b.height/2)set("--pad-b",sb.bottom-r.top+gap);else set("--pad-t",r.bottom-sb.top+gap);
+  }
+  // The open animation scales the menu slightly; measure again once it has finished.
+  box.addEventListener("animationend",()=>avoid());
   async function action(fn){error.textContent="";try{return await fn();}catch(e){error.textContent=e.message;return null;}}
   function labelURL(url){try{const u=new URL(url);let path=u.pathname;try{path=decodeURIComponent(path);}catch{}return u.hostname+(path==="/"?"":path);}catch{return url;}}
   function pageButton(v){
@@ -65,6 +92,9 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
         for(const child of [...children.get(n.id)].reverse())pending.push({n:child,list:sub,depth:depth+1});
       }
     }
+    // Bring "You are here" to the lower part of the list, near the thumb.
+    const here=tree.querySelector(".current>.open");
+    if(here){const sr=scroll.getBoundingClientRect(),hr=here.getBoundingClientRect();scroll.scrollTop+=hr.top+hr.height/2-(sr.top+sr.height*.7);markScrolled();}
   }
   function applyStatus(s){
     back.disabled=!s.source;back.textContent=s.source?"↩ Return to source":"No source linked yet";
@@ -113,7 +143,11 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
   currentPath.onclick=()=>{focusId=null;refresh(false);};
   allTrail.onclick=()=>{historyRoot=trailRoot;show("history");};
   buttons.history.onclick=()=>{historyRoot=null;show("history");};
-  function show(next){view=pages[next]?next:"trail";for(const [key,p] of Object.entries(pages)){p.hidden=key!==view;buttons[key].setAttribute("aria-current",String(key===view));}scroll.scrollTop=0;refresh();}
+  function show(next){
+    view=pages[next]?next:"trail";
+    for(const [key,p] of Object.entries(pages)){p.hidden=key!==view;buttons[key].setAttribute("aria-current",String(key===view));}
+    query.hidden=view!=="history";bookmarkQuery.hidden=view!=="bookmarks";avoid();scroll.scrollTop=0;markScrolled();refresh();
+  }
   query.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>refresh(false),150);};
   load.onclick=()=>{const g=generation;load.disabled=true;action(async()=>{const data=await call({type:"LIST",query:query.value,cursor,rootId:historyRoot});if(g===generation)appendRows(data);}).finally(()=>{load.disabled=false;});};
   paused.onchange=()=>action(async()=>{await call({type:"SETTINGS",paused:paused.checked});await refresh();});
@@ -136,5 +170,5 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
     const data=await call({type:"EXPORT"}),blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob),a=el("a");a.href=url;a.download="SearchTrail-visits-"+new Date().toISOString().slice(0,10)+".json";box.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
   });
-  show(initialView);return {refresh,show,error:message=>{error.textContent=message;}};
+  show(initialView);return {refresh,show,avoid,error:message=>{error.textContent=message;}};
 };

@@ -27,10 +27,14 @@ globalThis.SearchTrailCSS=`
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.st{--glass:rgba(246,248,253,.97);}}
 @media (prefers-reduced-transparency:reduce){.st{--glass:rgba(246,248,253,.98);}}
 .popup .panel {width:370px;max-width:100vw;height:min(580px,95dvh);border-radius:0;border:0;box-shadow:inset 0 1px 1px var(--sheen);animation:none;}
-.body {flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:2px 4px;}
+.body {flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:2px 4px;display:flex;flex-direction:column;}
+/* Short pages sit at the bottom of the menu, near the thumb; long pages scroll normally. */
+.page{flex:none;margin-top:auto;}
+/* Once the list is scrolled, its top edge fades instead of cutting a line of text in half. */
+.body.scrolled{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 14px);mask-image:linear-gradient(to bottom,transparent 0,#000 14px);}.pad-top{flex:none;height:var(--pad-t,0px);}.pad-bottom{flex:none;height:var(--pad-b,0px);}
 h1 {font-size:20px;font-weight:700;margin:0;letter-spacing:-.4px;}h2{font-size:15px;font-weight:650;margin:4px 0;}p{margin:8px 0;}
 .muted{color:var(--muted);font-size:12px;overflow-wrap:anywhere;}
-.row{display:flex;gap:8px;align-items:center;}.top{flex:none;margin-bottom:10px;}.close{margin-left:auto;min-height:44px;padding:6px 14px;border-radius:999px;}
+.row{display:flex;gap:8px;align-items:center;}.top{flex:none;margin-bottom:10px;padding-left:var(--head-l,0px);padding-right:var(--head-r,0px);}
 button,input,select{font:inherit;color:inherit;-webkit-tap-highlight-color:transparent;}
 button{cursor:pointer;border:1px solid var(--line);border-radius:14px;background:var(--fill);color:var(--text);padding:9px 12px;min-height:44px;
   box-shadow:inset 0 1px 0 var(--sheen);transition:background-color .12s,transform .12s;}
@@ -50,8 +54,12 @@ label{display:flex;gap:8px;align-items:center;margin:14px 0;font-size:13px;}.set
 .setting select{max-width:62%;min-height:44px;background:var(--fill);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:6px 10px;font-size:16px;}
 .setting input{max-width:55%;accent-color:var(--accent);}input[type=checkbox]{accent-color:var(--accent);width:18px;height:18px;}
 .controls{display:flex;flex-wrap:wrap;gap:8px;}.danger{color:var(--danger);}.empty{padding:14px 4px;color:var(--muted);}.load{width:100%;margin-bottom:6px;}
-.nav{display:flex;gap:2px;padding:4px;margin-top:10px;flex:none;border-radius:999px;background:var(--fill);border:1px solid var(--line);box-shadow:inset 0 1px 2px rgba(12,22,48,.06);}
-.nav button{flex:1;border:0;background:transparent;box-shadow:none;font-size:13px;font-weight:600;min-height:44px;border-radius:999px;color:var(--muted);}
+/* Bottom bar: search box (History, Bookmarks) above one row of section tabs. Side margins
+   keep both clear of the floating buttons where they overlap. */
+.foot{flex:none;display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.foot input[type=search]{width:auto;margin:0 var(--search-r,0px) 0 var(--search-l,0px);}
+.nav{display:flex;gap:2px;padding:4px;margin:0 var(--nav-r,0px) 0 var(--nav-l,0px);flex:none;border-radius:999px;background:var(--fill);border:1px solid var(--line);box-shadow:inset 0 1px 2px rgba(12,22,48,.06);}
+.nav button{flex:1 1 auto;min-width:0;border:0;background:transparent;box-shadow:none;font-size:12px;font-weight:600;min-height:44px;padding:4px 1px;border-radius:999px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .nav button[aria-current=true]{background:var(--fill-strong);color:var(--accent-text);box-shadow:0 1px 4px rgba(12,22,48,.14),inset 0 1px 0 var(--sheen);}
 .tree,.tree ul{list-style:none;padding:0;margin:0;}.tree ul{margin-left:12px;padding-left:10px;border-left:1px solid var(--line);}.tree ul.deep{margin-left:0;padding-left:0;border-left:0;}
 .tree li{position:relative;margin:6px 0;}.tree ul>li:before{content:"";position:absolute;left:-10px;top:22px;width:10px;border-top:1px solid var(--line);}
@@ -60,7 +68,9 @@ label{display:flex;gap:8px;align-items:center;margin:14px 0;font-size:13px;}.set
 .tree .current>.open{border:2px solid var(--accent);background:var(--accent-soft);}.badge{display:block;font-size:11px;color:var(--accent-text);margin-top:3px;font-weight:600;}
 /* Floating buttons: clear glass (blur of the page behind, light edge, faint outline and shadow
    so they stay findable on white and dark pages) with a coloured symbol. */
-.dock{position:relative;display:flex;flex-direction:column;gap:8px;width:50px;height:108px;}
+.dock{position:relative;z-index:2;display:flex;flex-direction:column;gap:8px;width:50px;height:108px;}
+/* Invisible layer behind the open menu: a tap on the page outside the menu closes it. */
+.scrim{position:fixed;inset:0;z-index:0;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 .launcher{all:initial;box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:50px;height:50px;flex:none;border-radius:18px;
   background:rgba(255,255,255,.1);-webkit-backdrop-filter:blur(3px) saturate(1.8);backdrop-filter:blur(3px) saturate(1.8);
   border:1px solid rgba(255,255,255,.55);
@@ -74,13 +84,6 @@ label{display:flex;gap:8px;align-items:center;margin:14px 0;font-size:13px;}.set
 .menu-launcher.tucked{width:14px;margin-left:48px;border-radius:7px;font-size:0;}
 .menu-launcher.tucked.edge-left{margin-left:-12px;}
 .menu-launcher.tucked::after{content:"";width:3px;height:20px;border-radius:2px;background:#1a6dff;opacity:.6;}
-[data-dock=bottom] .panel:not(.popup-panel){padding-bottom:110px;}
-/* The lower row remains useful for navigation next to the overlapping floating controls. */
-[data-dock=bottom] .nav{position:absolute;bottom:10px;left:calc(10px + var(--dock-left));right:calc(10px + var(--dock-right));margin:0;display:grid;grid-template-columns:1fr 1fr;border-radius:18px;gap:0;padding:0;}
-[data-dock=bottom] .nav button{font-size:12px;min-height:44px;padding:4px 3px;}
-[data-dock=bottom] .panel:not(.popup-panel){padding-bottom:110px;}
-[data-dock=top] .top{padding-left:var(--dock-left);padding-right:var(--dock-right);min-height:56px;flex-wrap:wrap;}
-[data-dock=top] .top h1{font-size:16px;}
 .fold{font-size:11px;min-height:32px;padding:5px 8px;margin-top:4px;}
 .save{min-width:44px;padding:4px;font-size:20px;}
 .launcher.bad{color:#e5484d;}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #72a1ff;outline-offset:2px;}
