@@ -4,47 +4,41 @@
   globalThis.__searchTrailLoaded=true;
   const C=SearchTrailCore;
   const makeId=()=>Array.from(crypto.getRandomValues(new Uint32Array(4)),n=>n.toString(16)).join("-");
-  let host,shadow,button,panelRoot,ui,open=false,options,lastURL,navId,lastTitle,failed,pendingVisit,inFlight=false,retryAt=0,dragging=false,ready=false;
+  let host,shadow,button,menuButton,dock,panelRoot,ui,open=false,options,lastURL,navId,lastTitle,failed,pendingVisit,inFlight=false,retryAt=0,dragging=false,ready=false;
   const routes=[];
   async function call(message) {
     const response=await browser.runtime.sendMessage(message);
     if(!response?.ok)throw Error(response?.error||"SearchTrail could not reach its background process.");
     return response.data;
   }
-  // A hold that lasts past 250 ms is not a tap: start loading the panel data then,
-  // so it is ready when the panel opens at 500 ms. Taps never wait behind it.
-  let warm=null;
-  function prefetch(){
-    warm={at:Date.now(),STATUS:call({type:"STATUS"}),TREE:call({type:"TREE"})};
-    warm.STATUS.catch(()=>{});warm.TREE.catch(()=>{});
-  }
-  function uiCall(message){
-    const keys=Object.keys(message);
-    if(warm && Date.now()-warm.at<3000 && keys.length===1 && warm[message.type]){const p=warm[message.type];delete warm[message.type];return p;}
-    return call(message);
-  }
+  const uiCall=call;
   function reportError(e) {failed=e.message;if(button){button.classList.add("bad");button.title=failed;}ui?.error(failed);}
   function viewport() {const v=window.visualViewport;return {x:v?.offsetLeft||0,y:v?.offsetTop||0,width:v?.width||innerWidth,height:v?.height||innerHeight};}
   function position() {
     if(!host || dragging)return;
     const v=viewport(),placement=options?.settings.placement||"bottom-right",clearance=options?.settings.clearance??16;
     const left=placement.endsWith("left"),top=placement.startsWith("top");
-    const y=v.y+(top?clearance:Math.max(8,v.height-50-clearance)),x=v.x+(left?12:Math.max(8,v.width-62));
+    const y=v.y+(top?clearance:Math.max(8,v.height-50-clearance)),x=v.x+(left?12:Math.max(8,v.width-120));
     host.style.setProperty("left",x+"px","important");host.style.setProperty("top",y+"px","important");
-    const gap=10,available=top?v.y+v.height-(y+50+gap)-8:y-v.y-gap-8;
-    const panelHeight=Math.max(100,Math.min(480,v.height*.56,available));
-    panelRoot.style.cssText=`position:fixed;left:${v.x+Math.max(8,(v.width-Math.min(400,v.width-16))/2)}px;top:${top?y+50+gap:y-gap}px;transform:${top?"none":"translateY(-100%)"};--sheet-width:${Math.min(400,v.width-16)}px;--sheet-height:${panelHeight}px;--sheet-origin:${top?"top":"bottom"} center;direction:ltr;`;
+    const panelWidth=Math.min(400,v.width-16),panelHeight=Math.min(560,Math.max(180,v.height*.68),v.height-16);
+    const panelY=top?v.y+8:v.y+v.height-panelHeight-8;
+    panelRoot.style.cssText=`position:fixed;z-index:0;left:${v.x+(v.width-panelWidth)/2}px;top:${panelY}px;--sheet-width:${panelWidth}px;--sheet-height:${panelHeight}px;--sheet-origin:${top?"top":"bottom"} center;direction:ltr;`;
+    // Reserve only the occupied corner of the footer/header, not a blank strip below the sheet.
+    panelRoot.dataset.dock=top?"top":"bottom";
+    panelRoot.style.setProperty("--dock-left",left?"128px":"0px");
+    panelRoot.style.setProperty("--dock-right",left?"0px":"128px");
+    dock.style.zIndex="2";
+
   }
   function toggle(value,view="trail") {
-    open=value;panelRoot.hidden=!open;button.setAttribute("aria-expanded",String(open));
-    if(open){if(!ui)ui=SearchTrailUI(panelRoot,uiCall,{onClose:()=>toggle(false),css:false});ui.show(view);if(failed)ui.error(failed);}
+    open=value;panelRoot.hidden=!open;menuButton.setAttribute("aria-expanded",String(open));menuButton.textContent=open?"×":"☰";menuButton.setAttribute("aria-label",open?"Close SearchTrail menu":"Open SearchTrail menu");
+    if(open){if(!ui)ui=SearchTrailUI(panelRoot,uiCall,{onClose:()=>toggle(false),css:false,initialView:view});else ui.show(view);if(failed)ui.error(failed);}
     position();
   }
   async function tap() {
-    if(open){toggle(false);return;}
     try {
       const result=await call({type:"RETURN"});
-      if(result?.none)toggle(true);
+      if(result?.none)toggle(true);else if(open)toggle(false);
     }catch(e){reportError(e);toggle(true);}
   }
   function mount() {
@@ -53,27 +47,30 @@
     host.style.cssText="all:initial!important;position:fixed!important;z-index:2147483647!important;display:block!important;direction:ltr!important;";
     shadow=host.attachShadow({mode:"closed"});const style=document.createElement("style");style.textContent=SearchTrailCSS;shadow.append(style);
     panelRoot=document.createElement("div");panelRoot.hidden=true;shadow.append(panelRoot);
-    button=document.createElement("button");button.className="launcher";button.textContent="↩";button.title="Tap: source page · Hold: trail and settings";
-    button.setAttribute("aria-label","Return to source page. Hold for browsing trail and settings.");button.setAttribute("aria-expanded","false");shadow.append(button);
-    let start,timer,warmTimer,held=false,suppressUntil=0;
+    button=document.createElement("button");button.className="launcher";button.textContent="↩";button.title="Return to source page";
+    button.setAttribute("aria-label","Return to source page");
+    dock=document.createElement("div");dock.className="dock";
+    menuButton=document.createElement("button");menuButton.className="launcher menu-launcher";menuButton.textContent="☰";menuButton.title="Open SearchTrail menu";
+    menuButton.setAttribute("aria-label","Open SearchTrail menu");menuButton.setAttribute("aria-expanded","false");
+    menuButton.onclick=()=>toggle(!open);dock.append(button,menuButton);shadow.append(dock);
+    let start,timer,held=false,suppressUntil=0;
     const press=on=>button.classList.toggle("pressed",on);
-    function cancel(){clearTimeout(timer);clearTimeout(warmTimer);start=null;dragging=false;press(false);}
+    function cancel(){clearTimeout(timer);start=null;dragging=false;press(false);}
     button.onpointerdown=e=>{
       if(e.button!==0)return;
       const r=host.getBoundingClientRect();held=false;dragging=false;start={x:e.clientX,y:e.clientY,left:r.left,top:r.top};
       button.setPointerCapture(e.pointerId);press(true);
-      warmTimer=setTimeout(()=>{if(start&&!dragging&&!open)prefetch();},250);
       timer=setTimeout(()=>{if(start&&!dragging){held=true;toggle(true);}},500);
     };
     button.onpointermove=e=>{
       if(!start)return;const dx=e.clientX-start.x,dy=e.clientY-start.y;
-      if(Math.abs(dx)+Math.abs(dy)>10){dragging=true;clearTimeout(timer);clearTimeout(warmTimer);press(false);}
+      if(Math.abs(dx)+Math.abs(dy)>10){dragging=true;clearTimeout(timer);press(false);}
       if(!dragging)return;const v=viewport();
-      host.style.setProperty("left",Math.max(v.x+4,Math.min(v.x+v.width-54,start.left+dx))+"px","important");
+      host.style.setProperty("left",Math.max(v.x+4,Math.min(v.x+v.width-112,start.left+dx))+"px","important");
       host.style.setProperty("top",Math.max(v.y+4,Math.min(v.y+v.height-54,start.top+dy))+"px","important");
     };
     button.onpointerup=e=>{
-      if(!start)return;clearTimeout(timer);clearTimeout(warmTimer);press(false);suppressUntil=Date.now()+800;
+      if(!start)return;clearTimeout(timer);press(false);suppressUntil=Date.now()+800;
       const moved=dragging;start=null;dragging=false;
       if(moved){
         const v=viewport(),r=host.getBoundingClientRect(),top=r.top+25<v.y+v.height/2;
@@ -84,7 +81,7 @@
       if(button.hasPointerCapture(e.pointerId))button.releasePointerCapture(e.pointerId);
     };
     button.onpointercancel=()=>{suppressUntil=Date.now()+800;cancel();position();};
-    button.oncontextmenu=e=>{e.preventDefault();clearTimeout(timer);clearTimeout(warmTimer);press(false);held=true;suppressUntil=Date.now()+800;toggle(true);};
+    button.oncontextmenu=e=>{e.preventDefault();clearTimeout(timer);press(false);held=true;suppressUntil=Date.now()+800;toggle(true);};
     button.onclick=()=>{if(Date.now()>=suppressUntil)tap();};
     document.documentElement.append(host);position();if(failed)reportError(Error(failed));
   }
@@ -105,7 +102,7 @@
       const result=await call(attempt);
       if(result.accepted!==false && pendingVisit===attempt)pendingVisit=null;
       if(result.accepted===false)retryAt=Date.now()+1000;
-      else {failed=null;button?.classList.remove("bad");if(button)button.title="Tap: source page · Hold: trail and settings";}
+      else {failed=null;button?.classList.remove("bad");if(button)button.title="Return to source page";}
       mount();
     }catch(e){retryAt=Date.now()+5000;reportError(e);}finally{inFlight=false;}
   }

@@ -5,6 +5,8 @@ if [[ "$(uname -s)" != Darwin ]]; then
   echo 'This build needs macOS with Xcode. Use the included GitHub Actions workflow from Windows.' >&2
   exit 1
 fi
+task_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$task_root/extension/manifest.json")"
+task_number="${GITHUB_RUN_NUMBER:-3}"
 task_build="$task_root/build"
 mkdir -p "$task_build" "$task_root/dist"
 if xcrun --find safari-web-extension-packager >/dev/null 2>&1; then
@@ -24,7 +26,7 @@ xcodebuild -project "$task_project" -scheme "$task_scheme" \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath "$task_build/DerivedData" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
-  IPHONEOS_DEPLOYMENT_TARGET=16.4 MARKETING_VERSION=0.2.0 CURRENT_PROJECT_VERSION=2 build
+  IPHONEOS_DEPLOYMENT_TARGET=16.4 MARKETING_VERSION="$task_version" CURRENT_PROJECT_VERSION="$task_number" build
 task_app="$(find "$task_build/DerivedData/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -type d -print -quit)"
 if [[ -z "$task_app" ]]; then echo 'No iPhone app was produced.' >&2; exit 1; fi
 python3 "$task_root/scripts/package-ipa.py" "$task_app" "$task_root/dist/SearchTrail-unsigned.ipa"
