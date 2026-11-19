@@ -27,7 +27,7 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   // Open shadow roots only inside this test, for inspection of production content/UI code.
   const attach=Element.prototype.attachShadow;Element.prototype.attachShadow=function(init){return attach.call(this,{...init,mode:'open'});};
   const listeners=[];
-  window.browser={extension:{inIncognitoContext:false},storage:{onChanged:{addListener:fn=>listeners.push(fn)}},runtime:{sendMessage:async m=>{const r=await window.sendMock(m);if(m.type==='SETTINGS')for(const fn of listeners)fn({settings:{}},'local');return r;}};
+  window.browser={extension:{inIncognitoContext:false},storage:{onChanged:{addListener:fn=>listeners.push(fn)}},runtime:{sendMessage:async m=>{const r=await window.sendMock(m);if(m.type==='SETTINGS')for(const fn of listeners)fn({settings:{}},'local');return r;}}};
  });
  const page=await context.newPage();
  await page.route('https://example.test/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><html dir="rtl"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Arabic page</title></head><body style="margin:20px;background:#fff"><h1>صفحة عربية للتجربة</h1><p>Test page for SearchTrail</p><a id="same" href="/next">Same tab link</a><br><a id="blank" target="_blank" href="https://other.test/page">New tab link</a><div style="height:1800px"></div></body></html>'}));

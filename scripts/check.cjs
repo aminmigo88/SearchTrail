@@ -4,4 +4,5 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'manifest.json'),'utf8'
 for(const file of fs.readdirSync(root).filter(x=>x.endsWith('.js'))){cp.execFileSync(process.execPath,['--check',path.join(root,file)],{stdio:'inherit'});}
 const assets=[...manifest.background.scripts,...manifest.content_scripts.flatMap(s=>s.js),manifest.browser_action.default_popup,...Object.values(manifest.icons)];
 for(const f of assets){if(!fs.existsSync(path.join(root,f)))throw Error('Missing asset '+f);}
+for(const file of fs.readdirSync(path.join(__dirname,'..','tests')).filter(x=>x.endsWith('.cjs'))){cp.execFileSync(process.execPath,['--check',path.join(__dirname,'..','tests',file)],{stdio:'inherit'});}
 console.log('JavaScript syntax, manifest JSON and required assets passed.');
