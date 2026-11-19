@@ -1,6 +1,13 @@
-# SearchTrail 0.3.3 — Safari browsing trails
+# SearchTrail 0.3.4 — Safari browsing trails
 
 Tap the floating arrow to return directly to the page that led here. Tap the separate ☰ button for a branching trail, saved history, bookmarks and settings. Holding the arrow is still an optional shortcut. Sources can be any permitted HTTP/HTTPS website.
+
+## New in 0.3.4
+
+- **No repeated pages in a trail:** going to a page that is already in the same trail (for example switching between a site's Home and Series links) returns to that entry instead of adding it again further down. "You are here" moves between the entries.
+- Repeats saved by earlier versions are shown once in the Trail, at their first occurrence; pages opened from a repeat appear under it. History still lists every visit.
+- Safari Back between repeated pages returns to the right entry instead of starting a new trail.
+- After you return to a page by a link, the arrow on that page leads to the page that first led to it (or opens the menu); Safari's Back still goes to the page you just left.
 
 ## New in 0.3.3
 
@@ -75,7 +82,7 @@ No certificate, provisioning profile or private key belongs in this repository. 
 
 Page nodes contain a title, full URL, timestamp and (when established) a parent node ID. The graph and history are stored locally in extension storage. Tab identities and document mappings are temporary session data. No backend, analytics or remote scripts.
 
-Relationships come from observed link taps, validated same-tab referrers, known document restoration and Safari's opener metadata. A navigation with no reliable parent starts a new tree. Reloads/restores reuse a known node instead of adding a loop. Addresses that differ only after `#`, and Google searches with the same search, count as the same page; a page is never a child of the same page. Following a link to a page that is already higher up in the path adds a new entry, so the arrow returns to the page that actually led there. Sites that use `#` addresses for different screens are recorded as one page. SearchTrail is a graph of observed pages, not a timestamped log of every back-button action.
+Relationships come from observed link taps, validated same-tab referrers, known document restoration and Safari's opener metadata. A navigation with no reliable parent starts a new tree. Reloads/restores reuse a known node instead of adding a loop. Addresses that differ only after `#`, and Google searches with the same search, count as the same page; a page is never a child of the same page. Going to a page that is already in the same trail, by a link or Back, returns to that entry instead of adding it again. Sites that use `#` addresses for different screens are recorded as one page. SearchTrail is a graph of observed pages, not a timestamped log of every back-button action.
 
 Private tabs cannot record, read normal history or change settings. Pausing/excluding prevents recording and clears the current source relationship for that page. Deleting history affects SearchTrail only, not Safari History.
 

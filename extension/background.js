@@ -183,6 +183,21 @@ async function liveTab(n,preferred) {
   }
   return null;
 }
+// Same address = same page within a trail. A page already reached in this trail (earlier in
+// the path, or opened before from the same page) is found among this tab's pages (one read);
+// when the page that led here came from another tab, a few steps up its own path are checked.
+async function inTrail(from, url, s) {
+  if(!from)return null;
+  const root=from.rootId||from.id, ids=s.stack||[], visited=await nodes(ids);
+  for(let i=ids.length-1;i>=0;i--) {
+    const v=visited.get(ids[i]);
+    if(v&&(v.rootId||v.id)===root&&samePage(v.url,url))return v;
+  }
+  if(ids.includes(from.id))return null;
+  let n=from;
+  for(let i=0;i<10&&n?.parentId;i++) {n=await node(n.parentId);if(n&&samePage(n.url,url))return n;}
+  return null;
+}
 // The page that led here. Copies of the same page saved by older versions are skipped, so
 // the arrow never "returns" to the page you are already on.
 async function sourceOf(current) {
@@ -236,29 +251,31 @@ async function treeFor(currentId,focusId) {
     frontier=next.filter(k=>!segs.has(k));
   }
   const loaded=await nodes([...segs.values()].flatMap(s=>s.ids));loaded.set(cur.id,cur);
-  // Older versions could save a page as a child of the same page (for example a Google
-  // search whose address changed). Such copies are shown as part of the page they repeat.
-  const rep=new Map();
-  const repOf=id=>{
-    if(rep.has(id))return rep.get(id);
-    const chain=[];let x=loaded.get(id),r=id;
-    while(x){
-      chain.push(x.id);r=x.id;
-      const p=x.parentId?loaded.get(x.parentId):null;
-      if(!p||chain.includes(p.id)||!samePage(p.url,x.url))break;
-      if(rep.has(p.id)){r=rep.get(p.id);break;}
-      x=p;
+  // Older versions could save a page again inside the same trail: under itself (a Google
+  // search whose address changed), further down its own path (going back by a link), or twice
+  // under one page. Each page is shown once, at its first occurrence, and anything opened from
+  // a repeat appears under that first one.
+  const keyOf=new Map([...loaded.values()].map(n=>[n.id,C.pageKey(n.url)]));
+  const order=[...loaded.values()].sort((a,b)=>(a.at-b.at)||(a.id<b.id?-1:a.id>b.id?1:0));
+  const rep=new Map(),upOf=new Map(),kidsOf=new Map();
+  for(const item of order) {
+    const p=item.parentId&&loaded.has(item.parentId)?(rep.get(item.parentId)??item.parentId):null,key=keyOf.get(item.id);
+    let r=null;
+    if(key) {
+      for(let a=p,i=0;a&&i<500;a=upOf.get(a),i++)if(keyOf.get(a)===key){r=a;break;}
+      if(!r&&p)r=kidsOf.get(p)?.get(key)||null;
     }
-    for(const c of chain)rep.set(c,r);
-    return r;
-  };
+    if(r){rep.set(item.id,r);continue;}
+    rep.set(item.id,item.id);upOf.set(item.id,p);
+    if(p&&key){if(!kidsOf.has(p))kidsOf.set(p,new Map());kidsOf.get(p).set(key,item.id);}
+  }
   const byId=new Map();
-  for(const item of loaded.values()){
-    if(repOf(item.id)!==item.id)continue;
-    const parentId=item.parentId&&loaded.has(item.parentId)?repOf(item.parentId):item.parentId;
+  for(const item of loaded.values()) {
+    if(rep.get(item.id)!==item.id)continue;
+    const parentId=item.parentId&&loaded.has(item.parentId)?upOf.get(item.id):item.parentId;
     byId.set(item.id,parentId===item.parentId?item:{...item,parentId});
   }
-  const shown=id=>loaded.has(id)?repOf(id):id;
+  const shown=id=>rep.get(id)||id;
   const start=byId.get(shown(cur.id))||cur;currentId=shown(currentId);
   let ancestors=[], seen=new Set(), n=start, missingParent=false, hidden=frontier.length>0;
   while(n && !seen.has(n.id)) {seen.add(n.id);ancestors.unshift(n);n=byId.get(n.parentId);}
@@ -341,12 +358,14 @@ async function handle(message,sender) {
       if(saved && !samePage(saved.url,url))saved=null;
       if(!saved && fresh?.restoreId && samePage(fresh.url,url))saved=known.get(fresh.restoreId)||null;
       if(!saved && message.kind==="reload" && samePage(previous?.url,url))saved=previous;
-      // A back/forward reload can lose its content-script identity. Reuse only an
-      // unambiguous entry in this tab's known traversal stack; never guess globally.
-      if(!saved && message.kind==="traverse" && !s.truncated) {
-        const stacked=await nodes(s.stack||[]);
-        const candidates=[...new Set(s.stack||[])].map(x=>stacked.get(x)).filter(item=>item && samePage(item.url,url));
-        if(candidates.length===1)saved=candidates[0];
+      // A back/forward reload can lose its content-script identity. Use the entry next to the
+      // current one in this tab's stack, else an unambiguous match, else the same page in this
+      // trail; never guess across trails.
+      if(!saved && message.kind==="traverse") {
+        const ids=s.stack||[],stacked=await nodes(ids),at=s.index??(ids.length-1);
+        const near=[ids[at-1],ids[at+1]].map(x=>stacked.get(x)).find(item=>item && samePage(item.url,url));
+        const candidates=[...new Set(ids)].map(x=>stacked.get(x)).filter(item=>item && samePage(item.url,url));
+        saved=near||(candidates.length===1&&!s.truncated?candidates[0]:null)||await inTrail(previous,url,s);
       }
       // Still on the same address in this tab (an "#…" jump, Google changing its address, or
       // the same address loaded again): it is the same page, not a new one.
@@ -366,6 +385,9 @@ async function handle(message,sender) {
       // A page is never saved as a child of the same page: opening the same address again
       // from it (for example in a new tab) is that page.
       if(!saved && parent && samePage(parent.url,url))saved=parent;
+      // Going to a page that is already in this trail (by a link or a menu, not only Back)
+      // returns to that entry instead of adding it again further down.
+      if(!saved && parent)saved=await inTrail(parent,url,s);
       if(!saved) {
         saved={id:message.navigationId,url,title:String(message.title||tab.title||url).slice(0,1000),at:Date.now(),parentId:parent?.id||null,rootId:parent?.rootId||parent?.id||message.navigationId,graphVersion:2};
         // Node and index are written together. Retry by navigationId is idempotent if session write fails.

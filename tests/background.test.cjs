@@ -150,11 +150,11 @@ test('new document back traversal reuses an unambiguous saved entry',async()=>{
   h.tabMap.get(1).url='https://example.com/a';await h.visit(1,'new-doc',{kind:'traverse'});
   assert.equal((await h.send(1,'TREE')).data.currentId,'a');assert.equal((await h.send(1,'LIST')).data.total,2);
 });
-test('ambiguous traversal with repeated URLs does not invent ancestry',async()=>{
+test('going back to a page by a link and then Back keeps one entry per page',async()=>{
   const h=harness();h.add(1,'https://example.com/a');await h.visit(1,'a');
   await follow(h,1,'https://example.com/b','b');await follow(h,1,'https://example.com/a','a2');await follow(h,1,'https://example.com/c','c');
   h.tabMap.get(1).url='https://example.com/a';await h.visit(1,'unknown',{kind:'traverse'});
-  assert.equal((await h.send(1,'STATUS')).data.source,null);
+  assert.equal((await h.send(1,'STATUS')).data.source,null);assert.equal((await h.send(1,'LIST')).data.total,3);
 });
 test('SPA route and restored document maintain their path',async()=>{
   const h=harness();h.add(1,'https://spa.example/a');await h.visit(1,'a');
@@ -274,13 +274,14 @@ test('delete interruption recovers after background restart without double decre
   assert.equal((await restarted.send(1,'DELETE',{id:'n1'})).ok,true);
   const list=(await restarted.send(1,'LIST')).data;assert.equal(list.total,3);assert.equal(list.items.length,3);assert.equal(h.local.pendingDelete,undefined);
 });
-test('truncated tab memory never confuses an old repeated URL with its newer occurrence',async()=>{
+test('a page repeated far apart in one tab stays one entry, and Back returns to it',async()=>{
   const h=harness();h.add(1,'https://example.com/origin');await h.visit(1,'origin');
   for(let i=1;i<=120;i++){h.tabMap.get(1).url=(i===1||i===70)?'https://example.com/repeated':'https://example.com/p'+i;await h.visit(1,'n'+i,{kind:'route'});}
-  h.tabMap.get(1).url='https://example.com/repeated';await h.visit(1,'old-reload',{kind:'traverse'});
-  assert.equal((await h.send(1,'TREE')).data.currentId,'old-reload');assert.equal((await h.send(1,'STATUS')).data.source,null);
+  assert.equal((await h.send(1,'LIST')).data.total,120,'the second visit to the repeated page is not a new entry');
+  h.tabMap.get(1).url='https://example.com/repeated';await h.visit(1,'back-to-repeated',{kind:'traverse'});
+  assert.equal((await h.send(1,'TREE')).data.currentId,'n1');assert.equal((await h.send(1,'STATUS')).data.source.id,'origin');
   // Exact identity still restores an old node even after its transient mapping was evicted.
-  await h.visit(1,'n1',{kind:'traverse'});assert.equal((await h.send(1,'STATUS')).data.source.id,'origin');
+  h.tabMap.get(1).url='https://example.com/p5';await h.visit(1,'n5',{kind:'traverse'});assert.equal((await h.send(1,'STATUS')).data.source.id,'n4');
 });
 test('wide partial trees are labelled and all branches remain accessible by paged trail history',async()=>{
   const h=harness();h.add(1,'https://example.com/root');await h.visit(1,'root');
@@ -465,4 +466,45 @@ test('a freshly opened pop-up can be closed from its first signal',async()=>{
   const h=harness();h.add(1,'https://akwam.ss/');await h.visit(1,'home');
   await h.send(1,'TAP',{});h.popup(60,'about:blank',1);h.tabMap.get(60).url='https://ads.example/x';
   await h.send(60,'FRESH_TAB');await settle();assert.equal(h.tabMap.has(60),false);
+});
+test('switching between two pages with the site menu keeps two entries',async()=>{
+  const h=harness();h.add(1,'https://akwam.ss/series');await h.visit(1,'series');
+  await follow(h,1,'https://akwam.ss/one','one');
+  for(let i=0;i<3;i++){await follow(h,1,'https://akwam.ss/series','s'+i);await follow(h,1,'https://akwam.ss/one','o'+i);}
+  const t=(await h.send(1,'TREE')).data;assert.equal(t.total,2);assert.equal(t.currentId,'one');
+  assert.deepEqual(Array.from(t.ancestors,n=>n.id),['series','one']);
+  assert.equal((await h.send(1,'STATUS')).data.source.id,'series');assert.equal((await h.send(1,'LIST')).data.total,2);
+  await follow(h,1,'https://akwam.ss/series','s9');
+  assert.equal((await h.send(1,'TREE')).data.currentId,'series');assert.equal((await h.send(1,'RETURN')).data.none,true);
+});
+test('a page opened from another tab is found higher up the path it came from',async()=>{
+  const h=harness();h.add(1,'https://site.example/home');await h.visit(1,'home');
+  await follow(h,1,'https://site.example/list','list');
+  await h.send(1,'OPEN_LINK',{href:'https://site.example/home'});await h.visit(10,'home-again');
+  assert.equal((await h.send(10,'TREE')).data.currentId,'home');assert.equal((await h.send(10,'LIST')).data.total,2);
+});
+test('repeats saved by older versions are shown once in the trail',async()=>{
+  const p=(id,url,at,parentId)=>({id,url,title:id,at,parentId,rootId:'s1',graphVersion:2});
+  const local={
+    'visit:s1':p('s1','https://akwam.ss/series',1,null),'visit:o1':p('o1','https://akwam.ss/one',2,'s1'),
+    'visit:s2':p('s2','https://akwam.ss/series',3,'o1'),'visit:o2':p('o2','https://akwam.ss/one',4,'s2'),
+    'visit:s3':p('s3','https://akwam.ss/series',5,'o2'),'visit:x':p('x','https://akwam.ss/show/1',6,'s3'),
+    'visit:o3':p('o3','https://akwam.ss/one',7,'s1')
+  };
+  const h=harness(local);h.tabMap.set(1,{id:1,url:'https://akwam.ss/show/1',title:'x',incognito:false});
+  h.session['tab:1']={token:'t',url:'https://akwam.ss/show/1',navigationId:'x',currentId:'x',documents:{x:'x'}};
+  const t=(await h.send(1,'TREE')).data;
+  assert.equal(t.total,3);assert.deepEqual(Array.from(t.items,n=>n.id).sort(),['o1','s1','x']);
+  assert.equal(Array.from(t.items).find(n=>n.id==='x').parentId,'s1');
+  assert.deepEqual(Array.from(t.ancestors,n=>n.id),['s1','x']);
+});
+test('Back between repeated pages saved by older versions does not start a new trail',async()=>{
+  const p=(id,url,at,parentId)=>({id,url,title:id,at,parentId,rootId:'s1',graphVersion:2});
+  const local={'visit:s1':p('s1','https://akwam.ss/series',1,null),'visit:o1':p('o1','https://akwam.ss/one',2,'s1'),
+    'visit:s2':p('s2','https://akwam.ss/series',3,'o1'),'visit:o2':p('o2','https://akwam.ss/one',4,'s2')};
+  const h=harness(local);h.tabMap.set(1,{id:1,url:'https://akwam.ss/one',title:'o2',incognito:false});
+  h.session['tab:1']={token:'t',url:'https://akwam.ss/one',navigationId:'o2',currentId:'o2',documents:{o2:'o2'},stack:['s1','o1','s2','o2'],index:3};
+  h.tabMap.get(1).url='https://akwam.ss/series';await h.visit(1,'new-document',{kind:'traverse'});
+  assert.equal((await h.send(1,'LIST')).data.total,4,'no new entry');
+  const t=(await h.send(1,'TREE')).data;assert.equal(t.currentId,'s1');assert.equal(t.total,2);
 });
