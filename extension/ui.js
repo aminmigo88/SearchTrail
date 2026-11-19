@@ -83,7 +83,7 @@ globalThis.SearchTrailUI=function(root,call,{onClose=()=>{},popup=false,css=true
       const row=el("li","visit"),b=pageButton(v),del=el("button","delete","×"),save=el("button","save","☆");save.setAttribute("aria-label","Bookmark: "+(v.title||v.url));save.onclick=()=>action(async()=>{await call({type:"BOOKMARK_SAVE",id:v.id});save.textContent="★";});
       b.append(el("span","time",new Date(v.at).toLocaleString()));b.onclick=()=>action(async()=>{await call({type:"OPEN_VISIT",id:v.id});onClose();});
       del.setAttribute("aria-label","Delete visit: "+(v.title||v.url));
-      del.onclick=()=>action(async()=>{await call({type:"DELETE",id:v.id});await refresh(false);});
+      del.onclick=()=>{const g=generation;del.disabled=true;action(async()=>{await call({type:"DELETE",id:v.id});if(g===generation){row.remove();shown--;total=Math.max(0,total-1);updateCount();}else await refresh(false);}).finally(()=>{del.disabled=false;});};
       row.append(b,save,del);list.append(row);shown++;
     }
     load.hidden=!data.more;updateCount();
