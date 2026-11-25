@@ -63,8 +63,13 @@
   browser.runtime.onMessage?.addListener(message=>{if(message?.type==="POPUP_BLOCKED")showPopupNote();});
   function reportError(e) {failed=e.message;if(button){button.classList.add("bad");button.title=failed;}ui?.error(failed);}
   function viewport() {const v=window.visualViewport;return {x:v?.offsetLeft||0,y:v?.offsetTop||0,width:v?.width||innerWidth,height:v?.height||innerHeight};}
+  // Zoomed in: Safari's pinch zoom makes the visible area narrower than the page layout. The
+  // buttons step aside until the page is zoomed back out; an open menu closes.
+  const zoomedIn=()=>{const v=window.visualViewport;return !!v&&v.width<document.documentElement.clientWidth*.92;};
   function position() {
     if(!host || dragging)return;
+    const zoomed=zoomedIn();dock.classList.toggle("zoomed",zoomed);
+    if(zoomed&&open){toggle(false);return;}
     const v=viewport(),placement=options?.settings.placement||"bottom-right",clearance=options?.settings.clearance??16;
     const left=placement.endsWith("left"),top=placement.startsWith("top");
     const y=v.y+(top?clearance:Math.max(8,v.height-STACK_H-clearance)),x=v.x+(left?EDGE_GAP:Math.max(8,v.width-STACK_W-EDGE_GAP));

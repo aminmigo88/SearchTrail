@@ -1,6 +1,11 @@
-# SearchTrail 0.3.4 — Safari browsing trails
+# SearchTrail 0.3.5 — Safari browsing trails
 
 Tap the floating arrow to return directly to the page that led here. Tap the separate ☰ button for a branching trail, saved history, bookmarks and settings. Holding the arrow is still an optional shortcut. Sources can be any permitted HTTP/HTTPS website.
+
+## New in 0.3.5
+
+- **Zoom:** the buttons step aside while you pinch-zoom into a page and come back when you zoom back out. An open menu closes when you zoom in. (Safari zooms the whole page, including anything an extension adds, so the buttons cannot simply keep their size.)
+- Builds now run only when started by hand, and each IPA is kept for 30 days.
 
 ## New in 0.3.4
 
@@ -111,7 +116,7 @@ npm run test:ui
 bash scripts/build-ios.sh
 ```
 
-The workflow runs logic and WebKit interface checks on Linux, then compiles on macOS for real iPhones and validates the embedded Safari extension before publishing an unsigned IPA. It runs on source/build changes on `main` and `codex/**` and supports manual dispatch. Standard GitHub macOS Actions allowance applies.
+The workflow runs logic and WebKit interface checks on Linux, then compiles on macOS for real iPhones and validates the embedded Safari extension before publishing an unsigned IPA. It runs only when started by hand: Actions → Build SearchTrail for iPhone → Run workflow. The IPA is kept for 30 days, interface screenshots for 7.
 
 The stable bundle IDs are `app.searchtrail.SearchTrail` and `app.searchtrail.SearchTrail.Extension` before re-signing.
 

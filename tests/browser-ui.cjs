@@ -131,6 +131,15 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   // A tap on the page outside the menu closes it.
   await page.mouse.click(10,10);await page.locator('.panel').waitFor({state:'hidden'});
   await page.setViewportSize({width:440,height:800});
+  // Pinch zoom: the buttons step aside while zoomed in (an open menu closes) and come back
+  // when zoomed out. Zoom is simulated by narrowing the visual viewport.
+  const zoom=on=>page.evaluate(on=>{if(on)Object.defineProperty(visualViewport,'width',{get:()=>200,configurable:true});else delete visualViewport.width;visualViewport.dispatchEvent(new Event('resize'));},on);
+  const dockVisibility=()=>page.locator('.dock').evaluate(d=>getComputedStyle(d).visibility);
+  await zoom(true);await eventually(()=>dockVisibility().then(v=>v==='hidden'));
+  await zoom(false);await eventually(()=>dockVisibility().then(v=>v==='visible'));
+  await page.locator('.menu-launcher').click();await page.locator('.panel').waitFor({state:'visible'});
+  await zoom(true);await page.locator('.panel').waitFor({state:'hidden'});await eventually(()=>dockVisibility().then(v=>v==='hidden'));
+  await zoom(false);await eventually(()=>dockVisibility().then(v=>v==='visible'));
   // Pop-up blocker: script pop-ups, script-made link clicks and invisible cover links to other
   // websites are stopped, with a short notice; the same website and links you tap still open.
   const opened=[];context.on('page',p=>opened.push(p));
@@ -156,7 +165,7 @@ const pause=ms=>new Promise(r=>setTimeout(r,ms));
   assert.equal(page.url(),'https://example.test/details','Managed new-tab link must leave the source page intact');
   await page.locator('#same').click();await page.waitForURL('https://example.test/next');
   assert.ok(requests.some(m=>m.type==='LINK_INTENT'&&m.href==='https://example.test/next'),'Same-tab link should record intent');
-  console.log('WebKit checks passed: direct tap, stacked menu button, swipe to hide and restore, hold, one-handed bottom tabs and search, close by tapping outside, pop-up blocking with notice and settings, branching tree, RTL isolation, history filter, saved placement, viewport resizing, generic links. Extension APIs simulated.');
+  console.log('WebKit checks passed: direct tap, stacked menu button, swipe to hide and restore, hold, one-handed bottom tabs and search, close by tapping outside, hidden while zoomed in, pop-up blocking with notice and settings, branching tree, RTL isolation, history filter, saved placement, viewport resizing, generic links. Extension APIs simulated.');
  }catch(e){fs.mkdirSync(path.join(__dirname,'../dist'),{recursive:true});await page.screenshot({path:path.join(__dirname,'../dist/ui-failure.png')}).catch(()=>{});throw e;}
  finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

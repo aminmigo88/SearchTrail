@@ -1,15 +1,8 @@
 name: Build SearchTrail for iPhone
+# Builds run only when started by hand (Actions → Build SearchTrail for iPhone → Run workflow),
+# so updating a branch never starts a build on its own.
 on:
   workflow_dispatch:
-  push:
-    branches: [main, "codex/**"]
-    paths:
-      - 'extension/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/build-ios.yml'
 permissions:
   contents: read
 jobs:
@@ -64,4 +57,4 @@ jobs:
           name: SearchTrail-unsigned-IPA
           path: dist/SearchTrail-unsigned.ipa
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30

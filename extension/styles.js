@@ -68,7 +68,8 @@ label{display:flex;gap:8px;align-items:center;margin:14px 0;font-size:13px;}.set
 .tree .current>.open{border:2px solid var(--accent);background:var(--accent-soft);}.badge{display:block;font-size:11px;color:var(--accent-text);margin-top:3px;font-weight:600;}
 /* Floating buttons: clear glass (blur of the page behind, light edge, faint outline and shadow
    so they stay findable on white and dark pages) with a coloured symbol. */
-.dock{position:relative;z-index:2;display:flex;flex-direction:column;gap:8px;width:50px;height:108px;}
+.dock{position:relative;z-index:2;display:flex;flex-direction:column;gap:8px;width:50px;height:108px;transition:opacity .15s ease,visibility .15s;}
+.dock.zoomed{opacity:0;visibility:hidden;pointer-events:none;}
 /* Invisible layer behind the open menu: a tap on the page outside the menu closes it. */
 .scrim{position:fixed;inset:0;z-index:0;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 .launcher{all:initial;box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:50px;height:50px;flex:none;border-radius:18px;
